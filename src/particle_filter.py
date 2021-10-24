@@ -561,7 +561,9 @@ class ParticleFiler():
         # apply the squash factor
         self.weights = np.power(self.weights, self.INV_SQUASH_FACTOR)
       else:
-        print("Cannot use radial optimizations with non-CDDT based methods, use rangelib_variant 2")
+        print(
+            "Cannot use radial optimizations with non-CDDT based methods, use rangelib_variant 2"
+        )
     elif self.RANGELIB_VAR == VAR_REPEAT_ANGLES_EVAL_SENSOR_ONE_SHOT:
       self.queries[:, :] = proposal_dist[:, :]
       self.range_method.calc_range_repeat_angles_eval_sensor_model(
@@ -590,8 +592,8 @@ class ParticleFiler():
         t_total = (t_squash - t_start) / 100.0
 
       if self.SHOW_FINE_TIMING and self.iters % 10 == 0:
-        print("sensor_model: init: ", np.round((t_init-t_start)/t_total, 2), "range:", np.round((t_range-t_init)/t_total, 2), \)
-              "eval:", np.round((t_eval-t_range)/t_total, 2), "squash:", np.round((t_squash-t_eval)/t_total, 2)
+        print("sensor_model: init: ", np.round((t_init-t_start)/t_total, 2), "range:", np.round((t_range-t_init)/t_total, 2), \
+              "eval:", np.round((t_eval-t_range)/t_total, 2), "squash:", np.round((t_squash-t_eval)/t_total, 2))
     elif self.RANGELIB_VAR == VAR_CALC_RANGE_MANY_EVAL_SENSOR:
       # this version demonstrates what this would look like with coordinate space conversion pushed to rangelib
       # this part is inefficient since it requires a lot of effort to construct this redundant array
@@ -671,8 +673,8 @@ class ParticleFiler():
       t_total = (t_norm - t) / 100.0
 
     if self.SHOW_FINE_TIMING and self.iters % 10 == 0:
-      print("MCL: propose: ", np.round((t_propose-t)/t_total, 2), "motion:", np.round((t_motion-t_propose)/t_total, 2), \)
-            "sensor:", np.round((t_sensor-t_motion)/t_total, 2), "norm:", np.round((t_norm-t_sensor)/t_total, 2)
+      print("MCL: propose: ", np.round((t_propose-t)/t_total, 2), "motion:", np.round((t_motion-t_propose)/t_total, 2), \
+            "sensor:", np.round((t_sensor-t_motion)/t_total, 2), "norm:", np.round((t_norm-t_sensor)/t_total, 2))
 
     # save the particles
     self.particles = proposal_distribution
@@ -715,8 +717,8 @@ class ParticleFiler():
         ips = 1.0 / (t2 - t1)
         self.smoothing.append(ips)
         if self.iters % 10 == 0:
-          print("iters per sec:", int(self.timer.fps()), " possible:", int()
-              self.smoothing.mean())
+          print("iters per sec:", int(self.timer.fps()), " possible:",
+                int(self.smoothing.mean()))
 
         self.visualize()
 
