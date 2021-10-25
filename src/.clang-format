@@ -1,0 +1,5 @@
+BasedOnStyle: Google
+UseTab: Never
+AccessModifierOffset: -2
+AlignConsecutiveAssignments: true
+AlignConsecutiveMacros: true

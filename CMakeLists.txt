@@ -9,12 +9,20 @@ project(particle_filter)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
   rospy
+  roscpp
+  cv_bridge
+  image_transport
   sensor_msgs
   std_msgs
 )
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
+find_package(OpenCV 4.5)
+if (OpenCV_FOUND)
+  message(STATUS "\tFound OpenCV at ${OpenCV_INCLUDE_DIRS}.")
+  message(STATUS "\tCompiling video_visualizer_node")
+endif(OpenCV_FOUND)
 
 
 ## Uncomment this if the package has a setup.py. This macro ensures
@@ -105,7 +113,7 @@ find_package(catkin REQUIRED COMPONENTS
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES particle_filter
-  CATKIN_DEPENDS  message_runtime rospy sensor_msgs std_msgs
+  CATKIN_DEPENDS  message_runtime rospy roscpp cv_bridge image_transport sensor_msgs std_msgs
 #  DEPENDS system_lib
 )
 
@@ -116,9 +124,12 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 # include_directories(include)
+if(OpenCV_FOUND)
 include_directories(
   ${catkin_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
 )
+endif(OpenCV_FOUND)
 
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
@@ -134,6 +145,9 @@ include_directories(
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
 # add_executable(${PROJECT_NAME}_node src/particle_filter_node.cpp)
+if(OpenCV_FOUND)
+  add_executable(video_visualizer src/video_visualizer_node.cpp)
+endif(OpenCV_FOUND)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -149,6 +163,13 @@ include_directories(
 # target_link_libraries(${PROJECT_NAME}_node
 #   ${catkin_LIBRARIES}
 # )
+if(OpenCV_FOUND)  
+  target_link_libraries(video_visualizer
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBRARIES}
+  )
+endif(OpenCV_FOUND)
+
 
 #############
 ## Install ##
@@ -166,11 +187,14 @@ install(PROGRAMS
 )
 
 ## Mark executables and/or libraries for installation
-# install(TARGETS ${PROJECT_NAME} ${PROJECT_NAME}_node
-#   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-#   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-#   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-# )
+if(OpenCV_FOUND)
+  install(TARGETS video_visualizer
+    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+  )
+endif(OpenCV_FOUND)
+
 
 ## Mark cpp header files for installation
 # install(DIRECTORY include/${PROJECT_NAME}/
