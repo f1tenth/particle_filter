@@ -30,6 +30,10 @@
 
   <include file="$(find particle_filter)/launch/localize_nomapserver.launch"/>
 
+  <node name="video_visualizer"
+    pkg="particle_filter"
+    type="video_visualizer"/>
+
   <node name="rviz"
     pkg="rviz"
     type="rviz"
