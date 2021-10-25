@@ -1,0 +1,38 @@
+<launch>
+  <!-- 
+
+	This launch file initializes particle filter localization.
+
+	arguments:
+		scan_topic - which ROS topic to listen for laser scan information
+		odom_topic - which ROS topic to listen for odometry information
+		max_particles - number of particles to maintain
+		angle_step    - laser scan ranges are downsampled by this factor
+		viz - whether or not to publish visualization topics.
+		      even if this is enabled, topics are not published unless there are subscribers
+		squash_factor - exponent used to "squash" the particle weights before normaliztation
+		                helps reduce problems associated with highly peaked prob. distributions
+
+	important parameters:
+		range_method: determines which RangeLibc algorithm to use. Options:
+			"bl": Bresenham's line. Slowest performance.
+			"rm": Ray Marching. Reasonably fast but suboptimal performance.
+			"rmgpu": GPU implementation of Ray Marching. Requires RangeLibc to be compiled WITH_CUDA=ON
+			"cddt": Compressed Directional Distance Transform. Compressed map representation. Fast query time.
+			"pcddt": Same as "cddt" but the data structure is pruned to remove unnecessary elements
+			"glt": Lookup table. Precomputes ray cast distances for a discretized state space. 
+			       Fast performance on the CPU but long initialization time.
+		max_range: maximum range of the laser scanner in meters. Measured ranges beyond max_range are clipped.
+		fine_timing: prints extra timing information, useful for profiling the particle filter
+		publish_odom: whether or not to publish inferred pose as an odometry message.
+		              publishes on /pf/pose/odom
+	 -->
+
+  <include file="$(find particle_filter)/launch/localize_nomapserver.launch"/>
+
+  <node name="rviz"
+    pkg="rviz"
+    type="rviz"
+    required="true"
+    args="-d $(find particle_filter)/rviz/pf.rviz" />
+</launch>
