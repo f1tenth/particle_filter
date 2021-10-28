@@ -14,11 +14,12 @@ find_package(catkin REQUIRED COMPONENTS
   image_transport
   sensor_msgs
   std_msgs
+  tf
 )
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-find_package(OpenCV 4.5)
+find_package(OpenCV 4.2)
 if (OpenCV_FOUND)
   message(STATUS "\tFound OpenCV at ${OpenCV_INCLUDE_DIRS}.")
   message(STATUS "\tCompiling video_visualizer_node")
@@ -113,7 +114,7 @@ endif(OpenCV_FOUND)
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES particle_filter
-  CATKIN_DEPENDS  message_runtime rospy roscpp cv_bridge image_transport sensor_msgs std_msgs
+  CATKIN_DEPENDS  message_runtime rospy roscpp cv_bridge image_transport sensor_msgs std_msgs tf
 #  DEPENDS system_lib
 )
 
@@ -183,6 +184,7 @@ endif(OpenCV_FOUND)
 install(PROGRAMS
   scripts/particle_filter.py
   scripts/utils.py
+  scripts/initialpose_publisher.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
