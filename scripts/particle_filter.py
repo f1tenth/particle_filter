@@ -190,14 +190,16 @@ class ParticleFiler():
       Callback function for the subscription of /map topic.
       It loads the occupancy map and updates map information.
     '''
+    # TODO: It would be bettern to use map identifier instead
+    # of checking every entry of the map.
     if self.map == None or (not np.array_equal(map_msg.data, self.map.data)):
       rospy.loginfo("New map received!")
       # TODO: This part would cause process dead.
       # Need debug.
-      self.map = map_msg
-      self.MAX_RANGE_PX = int(self.MAX_RANGE_METERS / self.map.info.resolution)
-      self.init_range_method()
-      self.precompute_sensor_model()
+    self.map = map_msg
+    self.MAX_RANGE_PX = int(self.MAX_RANGE_METERS / self.map.info.resolution)
+    self.init_range_method()
+    self.precompute_sensor_model()
 
   def get_omap(self):
     '''
@@ -410,7 +412,7 @@ class ParticleFiler():
       permissible_states[:,
                         2] = np.random.random(self.MAX_PARTICLES) * np.pi * 2.0
 
-      Utils.map_to_world(permissible_states, self.map_info)
+      Utils.map_to_world(permissible_states, self.map.info)
 
       self.particles = permissible_states
       self.weights[:] = 1.0 / self.MAX_PARTICLES
@@ -639,8 +641,8 @@ class ParticleFiler():
       self.range_method.calc_range_many(self.queries, self.ranges)
 
       # resolve the sensor model by discretizing and indexing into the precomputed table
-      obs /= float(self.map_info.resolution)
-      ranges = self.ranges / float(self.map_info.resolution)
+      obs /= float(self.map.info.resolution)
+      ranges = self.ranges / float(self.map.info.resolution)
       obs[obs > self.MAX_RANGE_PX] = self.MAX_RANGE_PX
       ranges[ranges > self.MAX_RANGE_PX] = self.MAX_RANGE_PX
 
