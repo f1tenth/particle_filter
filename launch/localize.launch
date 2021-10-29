@@ -28,6 +28,7 @@
 		              publishes on /pf/pose/odom
 	 -->
 	<include file="$(find particle_filter)/launch/map_server.launch"/>
+	<node pkg="particle_filter" type="initialpose_publisher.py" name="initialpose_publisher" output="screen"/>
 
 	<arg name="scan_topic" default="/scan"/>
 	<arg name="odometry_topic" default="/vesc/odom"/>

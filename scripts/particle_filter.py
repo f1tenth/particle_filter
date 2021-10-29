@@ -1,6 +1,7 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # packages
+from logging import raiseExceptions
 import rospy
 import numpy as np
 import range_libc
@@ -105,7 +106,7 @@ class ParticleFiler():
     self.timer = Utils.Timer(10)
     self.get_omap()
     self.precompute_sensor_model()
-    self.initialize_global()
+    # TODO: move particle init back here
 
     # keep track of speed from input odom
     self.current_speed = 0.0
@@ -137,14 +138,9 @@ class ParticleFiler():
         Odometry,
         self.odomCB,
         queue_size=1)
-    self.pose_sub = rospy.Subscriber(
-        "/initialpose",
-        PoseWithCovarianceStamped,
-        self.clicked_pose,
-        queue_size=1)
     self.click_sub = rospy.Subscriber(
-        "/clicked_point", PointStamped, self.clicked_pose, queue_size=1)
-
+        "/clicked_point", PointStamped, self.initialize_particles_pose, queue_size=1)
+    self.initialize_particles_pose()
     print("Finished initializing, waiting on messages...")
 
   def get_omap(self):
@@ -350,51 +346,49 @@ class ParticleFiler():
     # this topic is slower than lidar, so update every time we receive a message
     self.update()
 
-  def clicked_pose(self, msg):
-    '''
-        Receive pose messages from RViz and initialize the particle distribution in response.
-        '''
-    if isinstance(msg, PointStamped):
-      self.initialize_global()
-    elif isinstance(msg, PoseWithCovarianceStamped):
-      self.initialize_particles_pose(msg.pose.pose)
-
-  def initialize_particles_pose(self, pose):
+  def initialize_particles_pose(self):
     '''
         Initialize particles in the general region of the provided pose.
-        '''
-    print("SETTING POSE")
-    print(pose)
-    self.state_lock.acquire()
-    self.weights = np.ones(self.MAX_PARTICLES) / float(self.MAX_PARTICLES)
-    self.particles[:, 0] = pose.position.x + np.random.normal(
-        loc=0.0, scale=0.5, size=self.MAX_PARTICLES)
-    self.particles[:, 1] = pose.position.y + np.random.normal(
-        loc=0.0, scale=0.5, size=self.MAX_PARTICLES)
-    self.particles[:, 2] = Utils.quaternion_to_angle(
-        pose.orientation) + np.random.normal(
-            loc=0.0, scale=0.4, size=self.MAX_PARTICLES)
-    self.state_lock.release()
-
-  def initialize_global(self):
+        If pose if not provided, initialize particles uniformly in the
+        non-occupied area.
     '''
-        Spread the particle distribution over the permissible region of the state space.
-        '''
-    print("GLOBAL INITIALIZATION")
-    # randomize over grid coordinate space
+
     self.state_lock.acquire()
-    permissible_x, permissible_y = np.where(self.permissible_region == 1)
-    indices = np.random.randint(0, len(permissible_x), size=self.MAX_PARTICLES)
+    try:
+      pose = rospy.wait_for_message("/initial_pose", PoseStamped, timeout=10)
 
-    permissible_states = np.zeros((self.MAX_PARTICLES, 3))
-    permissible_states[:, 0] = permissible_y[indices]
-    permissible_states[:, 1] = permissible_x[indices]
-    permissible_states[:,
-                       2] = np.random.random(self.MAX_PARTICLES) * np.pi * 2.0
+      # Initialize a set of particles with normal distribution.
+      self.weights = np.ones(self.MAX_PARTICLES) / float(self.MAX_PARTICLES)
+      self.particles[:, 0] = pose.pose.position.x + np.random.normal(
+          loc=0.0, scale=0.5, size=self.MAX_PARTICLES)
+      self.particles[:, 1] = pose.pose.position.y + np.random.normal(
+          loc=0.0, scale=0.5, size=self.MAX_PARTICLES)
+      self.particles[:, 2] = Utils.quaternion_to_angle(
+          pose.pose.orientation) + np.random.normal(
+              loc=0.0, scale=0.4, size=self.MAX_PARTICLES)
+      
+      # Set the current inferred_pose.
+      # self.inferred_pose = np.array([pose.pose.position.x, pose.pose.position.y, Utils.quaternion_to_angle(
+      #     pose.pose.orientation)])
+      # self.visualize()
+    except rospy.ROSException:
+      rospy.logwarn("No initial pose is received. Localization might be unstable!")
 
-    Utils.map_to_world(permissible_states, self.map_info)
-    self.particles = permissible_states
-    self.weights[:] = 1.0 / self.MAX_PARTICLES
+      # Randomize over grid coordinate space
+      permissible_x, permissible_y = np.where(self.permissible_region == 1)
+      indices = np.random.randint(0, len(permissible_x), size=self.MAX_PARTICLES)
+
+      permissible_states = np.zeros((self.MAX_PARTICLES, 3))
+      permissible_states[:, 0] = permissible_y[indices]
+      permissible_states[:, 1] = permissible_x[indices]
+      permissible_states[:,
+                        2] = np.random.random(self.MAX_PARTICLES) * np.pi * 2.0
+
+      Utils.map_to_world(permissible_states, self.map_info)
+
+      self.particles = permissible_states
+      self.weights[:] = 1.0 / self.MAX_PARTICLES
+      
     self.state_lock.release()
 
   def precompute_sensor_model(self):
