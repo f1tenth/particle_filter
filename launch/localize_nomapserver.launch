@@ -30,9 +30,6 @@
 	<!-- Launch the initial pose publisher node -->
 	<node pkg="particle_filter" type="initialpose_publisher.py" name="initialpose_publisher" output="screen"/>
 
-	<!-- Launch the customized map service node-->
-	<node pkg="map_service" type="revit_map_test" name="revit_map_test"/>
-
 	<arg name="scan_topic" default="/scan"/>
 	<arg name="odometry_topic" default="/vesc/odom"/>
 	<!-- <arg name="odometry_topic" default="/odom"/> -->
