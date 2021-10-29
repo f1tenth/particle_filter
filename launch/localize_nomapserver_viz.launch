@@ -28,7 +28,7 @@
 		              publishes on /pf/pose/odom
 	 -->
 
-  <include file="$(find particle_filter)/launch/localize_mapservice.launch"/>
+  <include file="$(find particle_filter)/launch/localize_nomapserver.launch"/>
 
   <node name="video_visualizer"
     pkg="particle_filter"
