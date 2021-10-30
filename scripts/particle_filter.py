@@ -190,16 +190,20 @@ class ParticleFiler():
       Callback function for the subscription of /map topic.
       It loads the occupancy map and updates map information.
     '''
-    # TODO: It would be bettern to use map identifier instead
-    # of checking every entry of the map.
-    if self.map == None or (not np.array_equal(map_msg.data, self.map.data)):
-      rospy.loginfo("New map received!")
-      # TODO: This part would cause process dead.
-      # Need debug.
-    self.map = map_msg
-    self.MAX_RANGE_PX = int(self.MAX_RANGE_METERS / self.map.info.resolution)
-    self.init_range_method()
-    self.precompute_sensor_model()
+    
+    if self.state_lock.locked():
+        print("Map update blocked!")
+    else:
+      self.state_lock.acquire()
+      # TODO: It would be bettern to use map identifier instead
+      # of checking every entry of the map.
+      if self.map == None or (not np.array_equal(map_msg.data, self.map.data)):
+        rospy.loginfo("Map update succeeded!")
+        self.map = map_msg
+        self.MAX_RANGE_PX = int(self.MAX_RANGE_METERS / self.map.info.resolution)
+        self.init_range_method()
+        self.precompute_sensor_model()
+        self.state_lock.release()
 
   def get_omap(self):
     '''
