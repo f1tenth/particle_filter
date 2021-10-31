@@ -27,6 +27,9 @@
 		publish_odom: whether or not to publish inferred pose as an odometry message.
 		              publishes on /pf/pose/odom
 	 -->
+	<!-- Launch the initial pose publisher node -->
+	<node pkg="particle_filter" type="initialpose_publisher.py" name="initialpose_publisher" output="screen"/>
+
 	<arg name="scan_topic" default="/scan"/>
 	<arg name="odometry_topic" default="/vesc/odom"/>
 	<!-- <arg name="odometry_topic" default="/odom"/> -->

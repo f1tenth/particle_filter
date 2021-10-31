@@ -17,6 +17,7 @@ from sensor_msgs.msg import LaserScan
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import Point, Pose, PoseStamped, PoseArray, Quaternion, PolygonStamped, Polygon, Point32, PoseWithCovarianceStamped, PointStamped
 from nav_msgs.msg import Odometry
+from nav_msgs.msg import OccupancyGrid
 from nav_msgs.srv import GetMap
 
 # visualization packages
@@ -73,7 +74,7 @@ class ParticleFiler():
     self.odometry_data = np.array([0.0, 0.0, 0.0])
     self.laser = None
     self.iters = 0
-    self.map_info = None
+    self.map = None
     self.map_initialized = False
     self.lidar_initialized = False
     self.odom_initialized = False
@@ -104,10 +105,17 @@ class ParticleFiler():
     # initialize the state
     self.smoothing = Utils.CircularArray(10)
     self.timer = Utils.Timer(10)
-    self.get_omap()
-    self.precompute_sensor_model()
-    # TODO: move particle init back here
 
+    # Initialize an occupancy map 
+    try: # get map from /map topic
+      map_msg = rospy.wait_for_message("/map", OccupancyGrid, timeout=20)
+      self.mapCB(map_msg)
+    except rospy.ROSException:  # get map from default map_server
+      self.get_omap()
+      self.precompute_sensor_model()
+
+    self.map_initialized = True
+    
     # keep track of speed from input odom
     self.current_speed = 0.0
 
@@ -127,6 +135,13 @@ class ParticleFiler():
     # these topics are for coordinate space things
     self.pub_tf = tf.TransformBroadcaster()
 
+    # Subscribe to the live map topic.
+    self.map_sub = rospy.Subscriber(
+        rospy.get_param("~map_topic", "/map"),
+        OccupancyGrid,
+        self.mapCB,
+        queue_size=1
+    )
     # these topics are to receive data from the racecar
     self.laser_sub = rospy.Subscriber(
         rospy.get_param("~scan_topic", "/scan"),
@@ -143,23 +158,10 @@ class ParticleFiler():
     self.initialize_particles_pose()
     print("Finished initializing, waiting on messages...")
 
-  def get_omap(self):
-    '''
-        Fetch the occupancy grid map from the map_server instance, and initialize the correct
-        RangeLibc method. Also stores a matrix which indicates the permissible region of the map
-        '''
-    # this way you could give it a different map server as a parameter
-    map_service_name = rospy.get_param("~static_map", "static_map")
-    print("getting map from service: ", map_service_name)
-    rospy.wait_for_service(map_service_name)
-    map_msg = rospy.ServiceProxy(map_service_name, GetMap)().map
-
-    self.map_info = map_msg.info
-    oMap = range_libc.PyOMap(map_msg)
-    self.MAX_RANGE_PX = int(self.MAX_RANGE_METERS / self.map_info.resolution)
-
-    # initialize range method
+  def init_range_method(self):
+    '''Initialize range method'''
     print("Initializing range method:", self.WHICH_RM)
+    oMap = range_libc.PyOMap(self.map)
     if self.WHICH_RM == "bl":
       self.range_method = range_libc.PyBresenhamsLine(oMap, self.MAX_RANGE_PX)
     elif "cddt" in self.WHICH_RM:
@@ -175,16 +177,46 @@ class ParticleFiler():
     elif self.WHICH_RM == "glt":
       self.range_method = range_libc.PyGiantLUTCast(oMap, self.MAX_RANGE_PX,
                                                     self.THETA_DISCRETIZATION)
-    print("Done loading map")
-
     # 0: permissible, -1: unmapped, 100: blocked
-    array_255 = np.array(map_msg.data).reshape(
-        (map_msg.info.height, map_msg.info.width))
+    array_255 = np.array(self.map.data).reshape(
+        (self.map.info.height, self.map.info.width))
 
     # 0: not permissible, 1: permissible
     self.permissible_region = np.zeros_like(array_255, dtype=bool)
     self.permissible_region[array_255 == 0] = 1
-    self.map_initialized = True
+
+  def mapCB(self, map_msg):
+    '''
+      Callback function for the subscription of /map topic.
+      It loads the occupancy map and updates map information.
+    '''
+    
+    if self.state_lock.locked():
+        print("Map update blocked!")
+    else:
+      self.state_lock.acquire()
+      # TODO: It would be bettern to use map identifier instead
+      # of checking every entry of the map.
+      if self.map == None or (not np.array_equal(map_msg.data, self.map.data)):
+        rospy.loginfo("Map update succeeded!")
+        self.map = map_msg
+        self.MAX_RANGE_PX = int(self.MAX_RANGE_METERS / self.map.info.resolution)
+        self.init_range_method()
+        self.precompute_sensor_model()
+      self.state_lock.release()
+
+  def get_omap(self):
+    '''
+        Fetch the occupancy grid map from the map_server instance, and initialize the correct
+        RangeLibc method. Also stores a matrix which indicates the permissible region of the map
+        '''
+    # this way you could give it a different map server as a parameter
+    map_service_name = rospy.get_param("~static_map", "static_map")
+    print("getting map from service:", map_service_name)
+    rospy.wait_for_service(map_service_name)
+    self.map = rospy.ServiceProxy(map_service_name, GetMap)().map
+    self.MAX_RANGE_PX = int(self.MAX_RANGE_METERS / self.map.info.resolution)
+    self.init_range_method()
 
   def publish_tf(self, pose, stamp=None):
     """ Publish a tf for the car. This tells ROS where the car is with respect to the map. """
@@ -384,7 +416,7 @@ class ParticleFiler():
       permissible_states[:,
                         2] = np.random.random(self.MAX_PARTICLES) * np.pi * 2.0
 
-      Utils.map_to_world(permissible_states, self.map_info)
+      Utils.map_to_world(permissible_states, self.map.info)
 
       self.particles = permissible_states
       self.weights[:] = 1.0 / self.MAX_PARTICLES
@@ -613,8 +645,8 @@ class ParticleFiler():
       self.range_method.calc_range_many(self.queries, self.ranges)
 
       # resolve the sensor model by discretizing and indexing into the precomputed table
-      obs /= float(self.map_info.resolution)
-      ranges = self.ranges / float(self.map_info.resolution)
+      obs /= float(self.map.info.resolution)
+      ranges = self.ranges / float(self.map.info.resolution)
       obs[obs > self.MAX_RANGE_PX] = self.MAX_RANGE_PX
       ranges[ranges > self.MAX_RANGE_PX] = self.MAX_RANGE_PX
 
