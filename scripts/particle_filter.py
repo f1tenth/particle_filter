@@ -106,8 +106,8 @@ class ParticleFiler():
     self.smoothing = Utils.CircularArray(10)
     self.timer = Utils.Timer(10)
 
-    # Initialize an occupancy map 
-    try: # get map from /map topic
+    # Initialize an occupancy map
+    try:  # get map from /map topic
       map_msg = rospy.wait_for_message("/map", OccupancyGrid, timeout=20)
       self.mapCB(map_msg)
     except rospy.ROSException:  # get map from default map_server
@@ -115,7 +115,7 @@ class ParticleFiler():
       self.precompute_sensor_model()
 
     self.map_initialized = True
-    
+
     # keep track of speed from input odom
     self.current_speed = 0.0
 
@@ -140,8 +140,7 @@ class ParticleFiler():
         rospy.get_param("~map_topic", "/map"),
         OccupancyGrid,
         self.mapCB,
-        queue_size=1
-    )
+        queue_size=1)
     # these topics are to receive data from the racecar
     self.laser_sub = rospy.Subscriber(
         rospy.get_param("~scan_topic", "/scan"),
@@ -154,7 +153,10 @@ class ParticleFiler():
         self.odomCB,
         queue_size=1)
     self.click_sub = rospy.Subscriber(
-        "/clicked_point", PointStamped, self.initialize_particles_pose, queue_size=1)
+        "/clicked_point",
+        PointStamped,
+        self.initialize_particles_pose,
+        queue_size=1)
     self.initialize_particles_pose()
     print("Finished initializing, waiting on messages...")
 
@@ -190,9 +192,9 @@ class ParticleFiler():
       Callback function for the subscription of /map topic.
       It loads the occupancy map and updates map information.
     '''
-    
+
     if self.state_lock.locked():
-        print("Map update blocked!")
+      print("Map update blocked!")
     else:
       self.state_lock.acquire()
       # TODO: It would be bettern to use map identifier instead
@@ -200,7 +202,8 @@ class ParticleFiler():
       if self.map == None or (not np.array_equal(map_msg.data, self.map.data)):
         rospy.loginfo("Map update succeeded!")
         self.map = map_msg
-        self.MAX_RANGE_PX = int(self.MAX_RANGE_METERS / self.map.info.resolution)
+        self.MAX_RANGE_PX = int(self.MAX_RANGE_METERS /
+                                self.map.info.resolution)
         self.init_range_method()
         self.precompute_sensor_model()
       self.state_lock.release()
@@ -398,29 +401,31 @@ class ParticleFiler():
       self.particles[:, 2] = Utils.quaternion_to_angle(
           pose.pose.orientation) + np.random.normal(
               loc=0.0, scale=0.4, size=self.MAX_PARTICLES)
-      
+
       # Set the current inferred_pose.
       # self.inferred_pose = np.array([pose.pose.position.x, pose.pose.position.y, Utils.quaternion_to_angle(
       #     pose.pose.orientation)])
       # self.visualize()
     except rospy.ROSException:
-      rospy.logwarn("No initial pose is received. Localization might be unstable!")
+      rospy.logwarn(
+          "No initial pose is received. Localization might be unstable!")
 
       # Randomize over grid coordinate space
       permissible_x, permissible_y = np.where(self.permissible_region == 1)
-      indices = np.random.randint(0, len(permissible_x), size=self.MAX_PARTICLES)
+      indices = np.random.randint(
+          0, len(permissible_x), size=self.MAX_PARTICLES)
 
       permissible_states = np.zeros((self.MAX_PARTICLES, 3))
       permissible_states[:, 0] = permissible_y[indices]
       permissible_states[:, 1] = permissible_x[indices]
       permissible_states[:,
-                        2] = np.random.random(self.MAX_PARTICLES) * np.pi * 2.0
+                         2] = np.random.random(self.MAX_PARTICLES) * np.pi * 2.0
 
       Utils.map_to_world(permissible_states, self.map.info)
 
       self.particles = permissible_states
       self.weights[:] = 1.0 / self.MAX_PARTICLES
-      
+
     self.state_lock.release()
 
   def precompute_sensor_model(self):
@@ -548,7 +553,7 @@ class ParticleFiler():
 
   def sensor_model(self, proposal_dist, obs, weights):
     '''
-        This function computes a probablistic weight for each particle in the proposal distribution.
+        This function computes a probabilistic weight for each particle in the proposal distribution.
         These weights represent how probable each proposed (x,y,theta) pose is given the measured
         ranges from the lidar scanner.
 
@@ -556,7 +561,7 @@ class ParticleFiler():
         - VAR_REPEAT_ANGLES_EVAL_SENSOR is the most stable, and is very fast.
         - VAR_NO_EVAL_SENSOR_MODEL directly indexes the precomputed sensor model. This is slow
                                    but it demonstrates what self.range_method.eval_sensor_model does
-        - VAR_RADIAL_CDDT_OPTIMIZATIONS is only compatible with CDDT or PCDDT, it implments the radial
+        - VAR_RADIAL_CDDT_OPTIMIZATIONS is only compatible with CDDT or PCDDT, it implements the radial
                                         optimizations to CDDT which simultaneously performs ray casting
                                         in two directions, reducing the amount of work by roughly a third
         '''
@@ -641,7 +646,7 @@ class ParticleFiler():
       self.queries[:, 2] = np.repeat(proposal_dist[:, 2], num_rays)
       self.queries[:, 2] += self.tiled_angles
 
-      # compute the ranges for all the particles in a single functon call
+      # compute the ranges for all the particles in a single function call
       self.range_method.calc_range_many(self.queries, self.ranges)
 
       # resolve the sensor model by discretizing and indexing into the precomputed table
