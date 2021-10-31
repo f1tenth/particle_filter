@@ -203,7 +203,7 @@ class ParticleFiler():
         self.MAX_RANGE_PX = int(self.MAX_RANGE_METERS / self.map.info.resolution)
         self.init_range_method()
         self.precompute_sensor_model()
-        self.state_lock.release()
+      self.state_lock.release()
 
   def get_omap(self):
     '''
