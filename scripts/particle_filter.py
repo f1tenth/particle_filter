@@ -74,6 +74,7 @@ class ParticleFiler():
         rospy.get_param("~motion_dispersion_theta", 0.25))
 
     # camera model constants, max_cam_distance(m), FOV(deg).
+    # TODO: determine these two.
     self.MAX_CAM_DISTANCE = float(
         rospy.get_param("~max_cam_distance", 20))
     self.FOV = float(
@@ -419,7 +420,7 @@ class ParticleFiler():
       for idx, particle in enumerate(self.particles):
         poses = particle.reshape(1, -1).repeat(N, axis=0)
 
-        # find seeable reference landmarks.
+        # Find seeable reference landmarks.
         seeable = Utils.seeable(self.landmark, poses, self.MAX_CAM_DISTANCE, self.FOV)
         seeable_landmarks_robot = self.landmark[seeable, :-1] - particle.reshape(-1, 1)
 
