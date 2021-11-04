@@ -195,3 +195,70 @@ def world_to_map_slow(x, y, t, map_info):
   world = np.array([[x], [y]])
   map_c = rot * ((world - trans) / float(scale))
   return map_c[0, 0], map_c[1, 0], t - angle
+
+def seeable(landmarks, poses, max_distance, FOV):
+  '''
+    Check if landmarks centered at (x_c(m), y_c(m), theta(rad)) can be seen
+    from poses (x_p(m), y_p(m), theta_p(rad)) with a camera that has
+    1) max seeable distance: max_distance(m); 2) field of view: FOV(deg)
+    
+    landmarks: (N, 4);  poses: (N, 3), the last dimension of landmarks is the
+    landmark length(for now we only consider line-shaped doors).
+  '''
+  # Assert input shapes.
+  if poses.shape[0]!= landmarks.shape[0]:
+    rospy.logwarn("Poses should be of shape (N, 3) and landmarks should be of shape (N,4)!")
+    return
+
+  # Calculate the left and right corners of the landmarks.
+  Xc, Yc, Theta, L =  landmarks[:, 0].reshape(-1,1), \
+                      landmarks[:, 1].reshape(-1,1), \
+                      landmarks[:, 2].reshape(-1,1), \
+                      landmarks[:, 3].reshape(-1,1)
+  landmarks_l = np.concatenate((Xc + 0.5 * L * np.sin(Theta),
+                                Yc - 0.5 * L * np.cos(Theta),
+                                Theta), axis=1)
+  landmarks_r = np.concatenate((Xc - 0.5 * L * np.sin(Theta),
+                                Yc + 0.5 * L * np.cos(Theta),
+                                Theta), axis=1)
+
+  # Calculate the distances between each landmark and pose.
+  distances_l = np.sqrt(np.sum(np.power(landmarks_l[:, :2] - poses[:, :2], 2), axis=1))
+  distances_r = np.sqrt(np.sum(np.power(landmarks_r[:, :2] - poses[:, :2], 2), axis=1))
+
+  # Calculate the angles between each landmark and pose.
+  Xl, Yl = landmarks_l[:, 0], landmarks_l[:, 1]
+  Xr, Yr = landmarks_r[:, 0], landmarks_r[:, 1]
+  Xp, Yp, Thetap = poses[:, :0], poses[:, :1], poses[:, :2]
+  angles_l = np.arctan2(Xl-Xp, Yp-Yl) - Thetap
+  angles_r = np.arctan2(Xr-Xp, Yp-Yr) - Thetap
+
+  # Check if distances and angles are within sight.
+  seeable = (distances_l <= max_distance) & \
+            (distances_r <= max_distance) & \
+            (np.abs(angles_l) <= np.deg2rad(FOV/2)) & \
+            (np.abs(angles_r) <= np.deg2rad(FOV/2))
+
+  return seeable
+
+def normalize(x, scales):
+  '''
+      Balance the array dimensions according to their scales. 
+      x: (n_sample, n_dimension), array to be normalized.
+      scales: (n_dimension, ), scales for each dimension
+  '''
+  base = scales[0]
+  for dim, scale in enumerate(scales):
+    x[:, dim] *= scale / base
+
+  return x
+
+def landmark_to_array(landmark_list):
+  ''' Convert from cartographer_ros LandmarkList to numpy array.'''
+
+  a = np.empty((len(landmark_list), 3))
+  for i, landmark in enumerate(landmark_list):
+    a[i] = np.array([landmark.tracking_from_landmark_transform.position.x,
+                     landmark.tracking_from_landmark_transform.position.y,
+                     landmark.tracking_from_landmark_transform.orientation.z])
+  return a

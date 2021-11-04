@@ -19,12 +19,16 @@ from geometry_msgs.msg import Point, Pose, PoseStamped, PoseArray, Quaternion, P
 from nav_msgs.msg import Odometry
 from nav_msgs.msg import OccupancyGrid
 from nav_msgs.srv import GetMap
+from cartographer_ros_msgs.msg import LandmarkList
 
 # visualization packages
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 from matplotlib.ticker import LinearLocator, FormatStrFormatter
+
+from sklearn.neighbors import NearestNeighbors as KNN
+
 '''
 These flags indicate several variants of the sensor model. Only one of them is used at a time.
 '''
@@ -69,6 +73,12 @@ class ParticleFiler():
     self.MOTION_DISPERSION_THETA = float(
         rospy.get_param("~motion_dispersion_theta", 0.25))
 
+    # camera model constants, max_cam_distance(m), FOV(deg).
+    self.MAX_CAM_DISTANCE = float(
+        rospy.get_param("~max_cam_distance", 20))
+    self.FOV = float(
+        rospy.get_param("~FOV", 120))
+
     # various data containers used in the MCL algorithm
     self.MAX_RANGE_PX = None
     self.odometry_data = np.array([0.0, 0.0, 0.0])
@@ -86,6 +96,7 @@ class ParticleFiler():
     self.last_stamp = None
     self.first_sensor_update = True
     self.state_lock = Lock()
+    self.knn = KNN(n_neighbors=1, algorithm='ball_tree')
 
     # cache this to avoid memory allocation in motion model
     self.local_deltas = np.zeros((self.MAX_PARTICLES, 3))
@@ -101,6 +112,8 @@ class ParticleFiler():
     self.particle_indices = np.arange(self.MAX_PARTICLES)
     self.particles = np.zeros((self.MAX_PARTICLES, 3))
     self.weights = np.ones(self.MAX_PARTICLES) / float(self.MAX_PARTICLES)
+    # TODO: check if the scale for x/y is 2*MAX_RANGE_METERS.
+    self.scales = np.array([self.MAX_RANGE_METERS, self.MAX_RANGE_METERS, 2*np.pi])
 
     # initialize the state
     self.smoothing = Utils.CircularArray(10)
@@ -115,6 +128,12 @@ class ParticleFiler():
       self.precompute_sensor_model()
 
     self.map_initialized = True
+
+    # Initialize the set of reference landmarks in the floor plan.
+    # TODO: Get a list of landmarks(for now, doors) that has
+    # 1) shape = (N, 4), 2nd dimension corresponds to (x_center, y_center, theta, length)
+    # 2) note that **VERTICAL DOORS HAVE THETA = 0**
+    self.landmark = None
 
     # keep track of speed from input odom
     self.current_speed = 0.0
@@ -156,6 +175,11 @@ class ParticleFiler():
         "/clicked_point",
         PointStamped,
         self.initialize_particles_pose,
+        queue_size=1)
+    self.landmark_sub = rospy.Subscriber(
+        rospy.get_param("~landmark_topic", "/landmark"),
+        LandmarkList,
+        self.landmarkCB,
         queue_size=1)
     self.initialize_particles_pose()
     rospy.loginfo("Finished initializing, waiting on messages...")
@@ -379,6 +403,35 @@ class ParticleFiler():
 
     # this topic is slower than lidar, so update every time we receive a message
     self.update()
+
+  def landmarkCB(self, msg):
+    '''
+        Callback function for landmark subscription. It calculates the distances
+        between the observation and reference landmarks, and update particle weights
+        by multiplicatively accumulating the inverse of distances.
+    '''
+    # Update particle weights.
+    if self.state_lock.locked():
+      rospy.logwarn("Landmark update blocked!")
+    else:
+      self.state_lock.acquire()
+      N = len(msg.landmarks)
+      for idx, particle in enumerate(self.particles):
+        poses = particle.reshape(1, -1).repeat(N, axis=0)
+
+        # find seeable reference landmarks.
+        seeable = Utils.seeable(self.landmark, poses, self.MAX_CAM_DISTANCE, self.FOV)
+        seeable_landmarks_robot = self.landmark[seeable, :-1] - particle.reshape(-1, 1)
+
+        # Compare with observation.
+        self.knn.fit(Utils.normalize(seeable_landmarks_robot))
+        distances, _ = self.knn.kneighbors(
+            Utils.normalize(Utils.landmark_to_array(msg.landmark), self.scales))
+
+        # Update particle weights.
+        self.weights[idx] /= np.sum(distances)
+        self.weights /= np.sum(self.weights)
+      self.state_lock.release()
 
   def initialize_particles_pose(self):
     '''
