@@ -113,8 +113,6 @@ class ParticleFiler():
     self.particle_indices = np.arange(self.MAX_PARTICLES)
     self.particles = np.zeros((self.MAX_PARTICLES, 3))
     self.weights = np.ones(self.MAX_PARTICLES) / float(self.MAX_PARTICLES)
-    # TODO: check if the scale for x/y is 2*MAX_RANGE_METERS.
-    self.scales = np.array([self.MAX_RANGE_METERS, self.MAX_RANGE_METERS, 2*np.pi])
 
     # initialize the state
     self.smoothing = Utils.CircularArray(10)
@@ -128,13 +126,14 @@ class ParticleFiler():
       self.get_omap()
       self.precompute_sensor_model()
 
+    self.scales = np.array([self.map.info.width * self.map.info.resolution,
+                            self.map.info.height * self.map.info.resolution,
+                            2*np.pi])
     self.map_initialized = True
 
     # Initialize the set of reference landmarks in the floor plan.
-    # TODO: Get a list of landmarks(for now, doors) that has
-    # 1) shape = (N, 4), 2nd dimension corresponds to (x_center, y_center, theta, length)
-    # 2) note that **VERTICAL DOORS HAVE THETA = 0**
-    self.landmark = None
+    filename = rospy.get_param("~landmark_filename")
+    self.landmark = Utils.read_landmark_csv(filename)
 
     # keep track of speed from input odom
     self.current_speed = 0.0
@@ -421,13 +420,18 @@ class ParticleFiler():
         poses = particle.reshape(1, -1).repeat(N, axis=0)
 
         # Find seeable reference landmarks.
-        seeable = Utils.seeable(self.landmark, poses, self.MAX_CAM_DISTANCE, self.FOV)
+        ranges = np.zeros(self.MAX_PARTICLES, dtype=np.float32)
+        thetas = np.arctan2(self.landmark[:, 0] - self.particles[:, 0],
+                            self.particles[:, 1] - self.landmark[:, 1]).reshape(-1, 1)
+        queries = np.concatenate((self.particles[:, :2], thetas), axis=1)
+        self.range_method.calc_range_many(queries, ranges)
+        seeable = Utils.seeable(self.landmark, poses, ranges, self.MAX_CAM_DISTANCE, self.FOV)
         seeable_landmarks_robot = self.landmark[seeable, :-1] - particle.reshape(-1, 1)
 
         # Compare with observation.
         self.knn.fit(Utils.normalize(seeable_landmarks_robot))
         distances, _ = self.knn.kneighbors(
-            Utils.normalize(Utils.landmark_to_array(msg.landmark), self.scales))
+            Utils.normalize(Utils.landmarklist_to_array(msg.landmark), self.scales))
 
         # Update particle weights.
         self.weights[idx] /= np.sum(distances)
