@@ -206,7 +206,7 @@ def read_landmark_csv(filename):
       5. landmark length, in meters.
 
       Return an numpy array of size (N, 4) of (x_c, y_c, theta, length)
-      TODO: complete this function.
+      TODO(zhihao): complete this function.
   '''
   return None
 
@@ -226,7 +226,7 @@ def seeable(landmarks, poses, ranges, max_distance, FOV):
       ranges: lidar scan range from the particle position to the landmark center.
       This decides whether the landmark is blocked by wall/obstacles.
 
-      TODO: currently whether the landmark is blocked is determined by checking 
+      TODO(shumin): currently whether the landmark is blocked is determined by checking 
       the landmark center only. Improve it to check both ends.
   '''
   # Assert input shapes.

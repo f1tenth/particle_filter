@@ -74,7 +74,7 @@ class ParticleFiler():
         rospy.get_param("~motion_dispersion_theta", 0.25))
 
     # camera model constants, max_cam_distance(m), FOV(deg).
-    # TODO: determine these two.
+    # TODO(zhihao): determine these two.
     self.MAX_CAM_DISTANCE = float(
         rospy.get_param("~max_cam_distance", 20))
     self.FOV = float(
@@ -221,7 +221,7 @@ class ParticleFiler():
       rospy.logwarn("Map update blocked!")
     else:
       self.state_lock.acquire()
-      # TODO: It would be bettern to use map identifier instead
+      # TODO(shumin): It would be bettern to use map identifier instead
       # of checking every entry of the map.
       if self.map == None or (not np.array_equal(map_msg.data, self.map.data)):
         rospy.loginfo("Map update succeeded!")
@@ -587,7 +587,7 @@ class ParticleFiler():
         faster than doing it for each particle individually due to vectorization and reduction in
         function call overhead
         
-        TODO this could be better, but it works for now
+        TODO(shumin) this could be better, but it works for now
             - fixed random noise is not very realistic
             - ackermann model provides bad estimates at high speed
         '''
