@@ -196,14 +196,38 @@ def world_to_map_slow(x, y, t, map_info):
   map_c = rot * ((world - trans) / float(scale))
   return map_c[0, 0], map_c[1, 0], t - angle
 
-def seeable(landmarks, poses, max_distance, FOV):
+def read_landmark_csv(filename):
+  '''
+      Read in the reference landmark csv file that contains N instances with:
+      1. landmark type, e.g. door, window
+      2. landmark center x position in the map frame, in meters
+      3. landmark center y position in the map frame, in meters
+      4. landmark orientation in the map frame, in rad
+      5. landmark length, in meters.
+
+      Return an numpy array of size (N, 4) of (x_c, y_c, theta, length)
+      TODO: complete this function.
+  '''
+  return None
+
+def seeable(landmarks, poses, ranges, max_distance, FOV):
   '''
     Check if landmarks centered at (x_c(m), y_c(m), theta(rad)) can be seen
     from poses (x_p(m), y_p(m), theta_p(rad)) with a camera that has
     1) max seeable distance: max_distance(m); 2) field of view: FOV(deg)
     
-    landmarks: (N, 4);  poses: (N, 3), the last dimension of landmarks is the
-    landmark length(for now we only consider line-shaped doors).
+    Input:
+      landmarks: (N, 4), 2nd dimension is (x_c, y_c, theta, length)
+      of line-shaped reference landmarks, e.g. doors. These reference landmarks
+      should be obtained from the floormap.
+
+      poses: (N, 3), particles.
+
+      ranges: lidar scan range from the particle position to the landmark center.
+      This decides whether the landmark is blocked by wall/obstacles.
+
+      TODO: currently whether the landmark is blocked is determined by checking 
+      the landmark center only. Improve it to check both ends.
   '''
   # Assert input shapes.
   if poses.shape[0]!= landmarks.shape[0]:
@@ -234,8 +258,8 @@ def seeable(landmarks, poses, max_distance, FOV):
   angles_r = np.arctan2(Xr-Xp, Yp-Yr) - Thetap
 
   # Check if distances and angles are within sight.
-  seeable = (distances_l <= max_distance) & \
-            (distances_r <= max_distance) & \
+  seeable = (distances_l <= np.where(ranges < max_distance, ranges, max_distance)) & \
+            (distances_r <= np.where(ranges < max_distance, ranges, max_distance)) & \
             (np.abs(angles_l) <= np.deg2rad(FOV/2)) & \
             (np.abs(angles_r) <= np.deg2rad(FOV/2))
 
@@ -253,7 +277,7 @@ def normalize(x, scales):
 
   return x
 
-def landmark_to_array(landmark_list):
+def landmarklist_to_array(landmark_list):
   ''' Convert from cartographer_ros LandmarkList to numpy array.'''
 
   a = np.empty((len(landmark_list), 3))
