@@ -86,9 +86,11 @@ class ParticleFiler():
     self.laser = None
     self.iters = 0
     self.map = None
+    self.landmark = None
     self.map_initialized = False
     self.lidar_initialized = False
     self.odom_initialized = False
+    self.landmark_initialized = False
     self.last_pose = None
     self.laser_angles = None
     self.downsampled_angles = None
@@ -132,8 +134,13 @@ class ParticleFiler():
     self.map_initialized = True
 
     # Initialize the set of reference landmarks in the floor plan.
-    filename = rospy.get_param("~landmark_filename")
-    self.landmark = Utils.read_landmark_csv(filename)
+    try:
+      filename = rospy.get_param("~landmark_filename")
+      self.landmark = Utils.read_landmark_csv(filename)
+      self.landmark_initialized = True
+    except KeyError:
+      rospy.logwarn("No landmark list initialized! Please provide \
+          'landmark_filename' when launching particle filter.")
 
     # keep track of speed from input odom
     self.current_speed = 0.0
@@ -176,17 +183,18 @@ class ParticleFiler():
         PointStamped,
         self.initialize_particles_pose,
         queue_size=1)
-    self.landmark_sub = rospy.Subscriber(
-        rospy.get_param("~landmark_topic", "/landmark"),
-        LandmarkList,
-        self.landmarkCB,
-        queue_size=1)
+    if self.landmark_initialized:
+      self.landmark_sub = rospy.Subscriber(
+          rospy.get_param("~landmark_topic", "/landmark"),
+          LandmarkList,
+          self.landmarkCB,
+          queue_size=1)
     self.initialize_particles_pose()
     rospy.loginfo("Finished initializing, waiting on messages...")
 
   def init_range_method(self):
     '''Initialize range method'''
-    rospy.loginfo("Initializing range method:", self.WHICH_RM)
+    rospy.loginfo("Initializing range method: %s", self.WHICH_RM)
     oMap = range_libc.PyOMap(self.map)
     if self.WHICH_RM == "bl":
       self.range_method = range_libc.PyBresenhamsLine(oMap, self.MAX_RANGE_PX)
@@ -224,12 +232,12 @@ class ParticleFiler():
       # TODO(shumin): It would be bettern to use map identifier instead
       # of checking every entry of the map.
       if self.map == None or (not np.array_equal(map_msg.data, self.map.data)):
-        rospy.loginfo("Map update succeeded!")
         self.map = map_msg
         self.MAX_RANGE_PX = int(self.MAX_RANGE_METERS /
                                 self.map.info.resolution)
         self.init_range_method()
         self.precompute_sensor_model()
+        rospy.loginfo("Map update succeeded!")
       self.state_lock.release()
 
   def get_omap(self):
@@ -239,7 +247,7 @@ class ParticleFiler():
         '''
     # this way you could give it a different map server as a parameter
     map_service_name = rospy.get_param("~static_map", "static_map")
-    rospy.loginfo("getting map from service:", map_service_name)
+    rospy.loginfo("getting map from service: %s", map_service_name)
     rospy.wait_for_service(map_service_name)
     self.map = rospy.ServiceProxy(map_service_name, GetMap)().map
     self.MAX_RANGE_PX = int(self.MAX_RANGE_METERS / self.map.info.resolution)
@@ -410,7 +418,6 @@ class ParticleFiler():
         between the observation and reference landmarks, and update particle weights
         by multiplicatively accumulating the inverse of distances.
     '''
-    # Update particle weights.
     if self.state_lock.locked():
       rospy.logwarn("Landmark update blocked!")
     else:
@@ -426,6 +433,8 @@ class ParticleFiler():
         queries = np.concatenate((self.particles[:, :2], thetas), axis=1)
         self.range_method.calc_range_many(queries, ranges)
         seeable = Utils.seeable(self.landmark, poses, ranges, self.MAX_CAM_DISTANCE, self.FOV)
+
+        # Filter out unseeable landmarks, and transform to the particle frames.
         seeable_landmarks_robot = self.landmark[seeable, :-1] - particle.reshape(-1, 1)
 
         # Compare with observation.
@@ -680,8 +689,9 @@ class ParticleFiler():
         t_total = (t_squash - t_start) / 100.0
 
       if self.SHOW_FINE_TIMING and self.iters % 10 == 0:
-        rospy.loginfo("sensor_model: init: ", np.round((t_init-t_start)/t_total, 2), "range:", np.round((t_range-t_init)/t_total, 2), \
-              "eval:", np.round((t_eval-t_range)/t_total, 2), "squash:", np.round((t_squash-t_eval)/t_total, 2))
+        rospy.loginfo("sensor_model: init: %s, range: %s, eval: %s, squash: %s",
+            np.round((t_init-t_start)/t_total, 2), np.round((t_range-t_init)/t_total, 2),
+            np.round((t_eval-t_range)/t_total, 2), np.round((t_squash-t_eval)/t_total, 2))
     elif self.RANGELIB_VAR == VAR_CALC_RANGE_MANY_EVAL_SENSOR:
       # this version demonstrates what this would look like with coordinate space conversion pushed to rangelib
       # this part is inefficient since it requires a lot of effort to construct this redundant array
@@ -761,8 +771,9 @@ class ParticleFiler():
       t_total = (t_norm - t) / 100.0
 
     if self.SHOW_FINE_TIMING and self.iters % 10 == 0:
-      rospy.loginfo("MCL: propose: ", np.round((t_propose-t)/t_total, 2), "motion:", np.round((t_motion-t_propose)/t_total, 2), \
-            "sensor:", np.round((t_sensor-t_motion)/t_total, 2), "norm:", np.round((t_norm-t_sensor)/t_total, 2))
+      rospy.loginfo("MCL: propose: %s, motion: %s, sensor: %s, norm: %s",
+          np.round((t_propose-t)/t_total, 2), np.round((t_motion-t_propose)/t_total, 2), \
+          np.round((t_sensor-t_motion)/t_total, 2), np.round((t_norm-t_sensor)/t_total, 2))
 
     # save the particles
     self.particles = proposal_distribution
@@ -805,8 +816,9 @@ class ParticleFiler():
         ips = 1.0 / (t2 - t1)
         self.smoothing.append(ips)
         if self.iters % 10 == 0:
-          rospy.loginfo("iters per sec:", int(self.timer.fps()), " possible:",
-                int(self.smoothing.mean()))
+          rospy.loginfo("iters per sec: %s, possible: %s.",
+                        int(self.timer.fps()),
+                        int(self.smoothing.mean()))
 
         self.visualize()
 
@@ -826,7 +838,7 @@ def load_params_from_yaml(fp):
   with open(fp, 'r') as infile:
     yaml_data = load(infile)
     for param in yaml_data:
-      rospy.loginfo("param:", param, ":", yaml_data[param])
+      rospy.loginfo("param: %s : %s.", param, yaml_data[param])
       rospy.set_param("~" + param, yaml_data[param])
 
 
