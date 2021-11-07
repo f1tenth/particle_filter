@@ -28,7 +28,6 @@ from matplotlib import cm
 from matplotlib.ticker import LinearLocator, FormatStrFormatter
 
 from sklearn.neighbors import NearestNeighbors as KNN
-
 '''
 These flags indicate several variants of the sensor model. Only one of them is used at a time.
 '''
@@ -75,10 +74,8 @@ class ParticleFiler():
 
     # camera model constants, max_cam_distance(m), FOV(deg).
     # TODO(zhihao): determine these two.
-    self.MAX_CAM_DISTANCE = float(
-        rospy.get_param("~max_cam_distance", 20))
-    self.FOV = float(
-        rospy.get_param("~FOV", 120))
+    self.MAX_CAM_DISTANCE = float(rospy.get_param("~max_cam_distance", 20))
+    self.FOV = float(rospy.get_param("~FOV", 120))
 
     # various data containers used in the MCL algorithm
     self.MAX_RANGE_PX = None
@@ -126,9 +123,10 @@ class ParticleFiler():
       self.get_omap()
       self.precompute_sensor_model()
 
-    self.scales = np.array([self.map.info.width * self.map.info.resolution,
-                            self.map.info.height * self.map.info.resolution,
-                            2*np.pi])
+    self.scales = np.array([
+        self.map.info.width * self.map.info.resolution,
+        self.map.info.height * self.map.info.resolution, 2 * np.pi
+    ])
     self.map_initialized = True
 
     # Initialize the set of reference landmarks in the floor plan.
@@ -422,16 +420,20 @@ class ParticleFiler():
         # Find seeable reference landmarks.
         ranges = np.zeros(self.MAX_PARTICLES, dtype=np.float32)
         thetas = np.arctan2(self.landmark[:, 0] - self.particles[:, 0],
-                            self.particles[:, 1] - self.landmark[:, 1]).reshape(-1, 1)
+                            self.particles[:, 1] - self.landmark[:, 1]).reshape(
+                                -1, 1)
         queries = np.concatenate((self.particles[:, :2], thetas), axis=1)
         self.range_method.calc_range_many(queries, ranges)
-        seeable = Utils.seeable(self.landmark, poses, ranges, self.MAX_CAM_DISTANCE, self.FOV)
-        seeable_landmarks_robot = self.landmark[seeable, :-1] - particle.reshape(-1, 1)
+        seeable = Utils.seeable(self.landmark, poses, ranges,
+                                self.MAX_CAM_DISTANCE, self.FOV)
+        seeable_landmarks_robot = self.landmark[
+            seeable, :-1] - particle.reshape(-1, 1)
 
         # Compare with observation.
         self.knn.fit(Utils.normalize(seeable_landmarks_robot))
         distances, _ = self.knn.kneighbors(
-            Utils.normalize(Utils.landmarklist_to_array(msg.landmark), self.scales))
+            Utils.normalize(
+                Utils.landmarklist_to_array(msg.landmark), self.scales))
 
         # Update particle weights.
         self.weights[idx] /= np.sum(distances)
@@ -806,7 +808,7 @@ class ParticleFiler():
         self.smoothing.append(ips)
         if self.iters % 10 == 0:
           rospy.loginfo("iters per sec:", int(self.timer.fps()), " possible:",
-                int(self.smoothing.mean()))
+                        int(self.smoothing.mean()))
 
         self.visualize()
 
