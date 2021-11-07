@@ -37,10 +37,12 @@
 	<arg name="max_particles" default="4000"/>
 	<arg name="squash_factor" default="2.2"/>
 	<arg name="viz" default="1"/>
+  <arg name="landmark_filename" default="$(find particle_filter)/csv/levine_2.csv"/>
 	
 	<node pkg="particle_filter" type="particle_filter.py" name="Particle_filter" output="screen">
 		<param name="scan_topic" value="$(arg scan_topic)"/>
 		<param name="odometry_topic" value="$(arg odometry_topic)"/>
+    <param name="landmark_filename" value="$(arg landmark_filename)"/>
 		<!-- range data is downsampled by this factor -->
 		<param name="angle_step" value="$(arg angle_step)"/>
 		<param name="max_particles" value="$(arg max_particles)"/>

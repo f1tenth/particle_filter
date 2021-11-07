@@ -210,6 +210,7 @@ install(DIRECTORY
   launch
   maps
   rviz
+  csv
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 

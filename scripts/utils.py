@@ -10,6 +10,7 @@ import tf.transformations
 import tf
 import matplotlib.pyplot as plt
 import time
+import csv
 
 
 class CircularArray(object):
@@ -207,9 +208,22 @@ def read_landmark_csv(filename):
       5. landmark length, in meters.
 
       Return an numpy array of size (N, 4) of (x_c, y_c, theta, length)
-      TODO(zhihao): complete this function.
   '''
-  return None
+  landmark_list = []
+  with open(filename, 'r') as csv_file:
+    reader = csv.DictReader(csv_file)
+    for line in reader:
+      if line['Type'] != 'wall':
+        landmark_list.append(
+            np.array([
+                float(line['x_1']),
+                float(line['y_1']),
+                float(line['Orientation']), 0.0
+            ]))
+
+  landmarks = np.stack(landmark_list)
+
+  return landmarks
 
 
 def seeable(landmarks, poses, ranges, max_distance, FOV):
