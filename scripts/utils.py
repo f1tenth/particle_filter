@@ -2,7 +2,7 @@
 
 import rospy
 import numpy as np
-
+import pandas as pd
 from std_msgs.msg import Header
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import Point, Pose, PoseStamped, PoseArray, Quaternion, PolygonStamped, Polygon, Point32, PoseWithCovarianceStamped, PointStamped
@@ -251,7 +251,12 @@ def seeable(landmarks, poses, ranges, max_distance, FOV):
         "Poses should be of shape (N, 3) and landmarks should be of shape (N,4)!"
     )
     return
-
+  # df = pd.DataFrame(landmarks)
+  # df.to_csv("~/Desktop/test/landmarks.csv")
+  # df = pd.DataFrame(poses)
+  # df.to_csv("~/Desktop/test/poses.csv")
+  # df = pd.DataFrame(ranges)
+  # df.to_csv("~/Desktop/test/ranges.csv")
   # Calculate the left and right corners of the landmarks.
   Xc, Yc, Theta, L =  landmarks[:, 0].reshape(-1,1), \
                       landmarks[:, 1].reshape(-1,1), \
@@ -265,21 +270,18 @@ def seeable(landmarks, poses, ranges, max_distance, FOV):
       axis=1)
 
   # Calculate the distances between each landmark and pose.
-  distances_l = np.sqrt(
-      np.sum(np.power(landmarks_l[:, :2] - poses[:, :2], 2), axis=1))
-  distances_r = np.sqrt(
-      np.sum(np.power(landmarks_r[:, :2] - poses[:, :2], 2), axis=1))
-
+  distances_l = np.sum((landmarks_l[:, :2] - poses[:, :2])*(landmarks_l[:, :2] - poses[:, :2]), axis=1)
+  distances_r = np.sum((landmarks_r[:, :2] - poses[:, :2])*(landmarks_r[:, :2] - poses[:, :2]), axis=1)
   # Calculate the angles between each landmark and pose.
   Xl, Yl = landmarks_l[:, 0], landmarks_l[:, 1]
   Xr, Yr = landmarks_r[:, 0], landmarks_r[:, 1]
-  Xp, Yp, Thetap = poses[:, :0], poses[:, :1], poses[:, :2]
-  angles_l = np.arctan2(Xl - Xp, Yp - Yl) - Thetap
-  angles_r = np.arctan2(Xr - Xp, Yp - Yr) - Thetap
-
+  Xp, Yp, Thetap = poses[:, 0], poses[:, 1], poses[:, 2]
+  angles_l = np.arctan2(Yl - Yp, Xl - Xp) - Thetap
+  angles_r = np.arctan2(Yr - Yp, Xr - Xp) - Thetap
   # Check if distances and angles are within sight.
-  seeable = (distances_l <= np.where(ranges < max_distance, ranges, max_distance)) & \
-            (distances_r <= np.where(ranges < max_distance, ranges, max_distance)) & \
+  ranges += 1  # padding.
+  seeable = (distances_l <= ranges**2) & \
+            (distances_r <= ranges**2) & \
             (np.abs(angles_l) <= np.deg2rad(FOV/2)) & \
             (np.abs(angles_r) <= np.deg2rad(FOV/2))
 
@@ -301,6 +303,18 @@ def normalize(x, scales):
 
 def landmarklist_to_array(landmark_list):
   ''' Convert from cartographer_ros LandmarkList to numpy array.'''
+
+  a = np.empty((len(landmark_list), 3))
+  for i, landmark in enumerate(landmark_list):
+    a[i] = np.array([
+        landmark.tracking_from_landmark_transform.position.x,
+        landmark.tracking_from_landmark_transform.position.y,
+        landmark.tracking_from_landmark_transform.orientation.z
+    ])
+  return a
+
+def landmark_detection_list_to_array(landmark_list):
+  ''' TODO: Convert from cad2cav LandmarkDetectionList to numpy array.'''
 
   a = np.empty((len(landmark_list), 3))
   for i, landmark in enumerate(landmark_list):
