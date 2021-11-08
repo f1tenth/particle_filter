@@ -72,10 +72,22 @@ class ParticleFiler():
     self.MOTION_DISPERSION_THETA = float(
         rospy.get_param("~motion_dispersion_theta", 0.25))
 
-    # camera model constants, max_cam_distance(m), FOV(deg).
-    # TODO(zhihao): determine these two.
+    # parameters used in the landmark callback.
+    # TODO(zhihao): determine the first one.
     self.MAX_CAM_DISTANCE = float(rospy.get_param("~max_cam_distance", 20))
-    self.FOV = float(rospy.get_param("~FOV", 120))
+    # TODO(shumin): calculate this from intrinsic params
+    self.FOV = float(rospy.get_param("~FOV", 150))
+
+    # The landmark detection is quite unstable, do smoothing over a window
+    # of size self.landmark_window as follows:
+    # 1. Count the number of consecutive landmark msgs that have same number
+    # of landmarks detected and save it in self.stable_landmark_msg_count.
+    # 2. If the stable_landmark_msg_count has reached the window size, do particle
+    # weight update based on the last landmark detection result.
+    self.landmark_window = int(rospy.get_param("~landmark_window", 6))
+    self.stable_landmark_msg_count = 0
+    self.prev_landmark_count = None
+    self.prev_landmark_update_time = rospy.get_time()
 
     # various data containers used in the MCL algorithm
     self.MAX_RANGE_PX = None
@@ -152,6 +164,8 @@ class ParticleFiler():
         "/pf/viz/fake_scan", LaserScan, queue_size=1)
     self.rect_pub = rospy.Publisher(
         "/pf/viz/poly1", PolygonStamped, queue_size=1)
+    self.landmark_debug_pub = rospy.Publisher(
+        "/revit/landmark_pose_array", PoseArray, queue_size=1)
 
     if self.PUBLISH_ODOM:
       self.odom_pub = rospy.Publisher("/pf/pose/odom", Odometry, queue_size=1)
@@ -416,36 +430,58 @@ class ParticleFiler():
         between the observation and reference landmarks, and update particle weights
         by multiplicatively accumulating the inverse of distances.
     '''
-    if self.state_lock.locked():
-      rospy.logwarn("Landmark update blocked!")
+    N = len(msg.landmarks)
+    # Do nothing if no object detected or the detection is unstable.
+    # TODO(shumin): change 3s to a const param.
+    time_diff = rospy.get_time() - self.prev_landmark_update_time
+    if N == 0 or N != self.prev_landmark_count or time_diff < 3:
+      self.stable_landmark_msg_count = 0
+    # Increase the stable msg count if it has the same number of
+    # landmark detected.
     else:
-      self.state_lock.acquire()
-      N = len(msg.landmarks)
-      for idx, particle in enumerate(self.particles):
-        poses = particle.reshape(1, -1).repeat(N, axis=0)
+      self.stable_landmark_msg_count += 1
+      if self.stable_landmark_msg_count >= self.landmark_window:
+        if self.state_lock.locked():
+          rospy.logwarn("Landmark update blocked!")
+        else:
+          self.state_lock.acquire()
+          for idx, particle in enumerate(self.particles):
+            ref_landmark_cnt = len(self.landmark)
+            poses = particle.reshape(1, -1).repeat(ref_landmark_cnt, axis=0)
 
-        # Find seeable reference landmarks.
-        ranges = np.zeros(self.MAX_PARTICLES, dtype=np.float32)
-        thetas = np.arctan2(self.landmark[:, 0] - self.particles[:, 0],
-                            self.particles[:, 1] - self.landmark[:, 1]).reshape(
-                                -1, 1)
-        queries = np.concatenate((self.particles[:, :2], thetas), axis=1)
-        self.range_method.calc_range_many(queries, ranges)
-        seeable = Utils.seeable(self.landmark, poses, ranges,
-                                self.MAX_CAM_DISTANCE, self.FOV)
-        seeable_landmarks_robot = self.landmark[
-            seeable, :-1] - particle.reshape(-1, 1)
+            # Find seeable reference landmarks.
+            ranges = np.zeros(ref_landmark_cnt, dtype=np.float32)
+            print("calling arctan")
+            thetas = np.arctan2(self.landmark[:, 1] - poses[:, 1],
+                                self.landmark[:, 0] - poses[:, 0]).reshape(
+                                    -1, 1)
+            queries = np.concatenate((poses[:, :2], thetas), axis=1).astype(np.float32)
+            print("calling calc_range_many")
+            self.range_method.calc_range_many(queries, ranges)
+            print("calling seeable")
+            seeable = Utils.seeable(self.landmark, poses, ranges,
+                                    self.MAX_CAM_DISTANCE, self.FOV)
+            seeable_landmarks_robot = self.landmark[
+                seeable, :-1] - particle.reshape(1, -1)
+            if np.argmax(self.weights) == idx:
+              self.debug_msg = PoseArray()
+              self.debug_msg.header = Utils.make_header("map")
+              self.debug_msg.poses = Utils.particles_to_poses(self.landmark[seeable, :-1])
+              self.landmark_debug_pub.publish(self.debug_msg)
+            # Compare with observation.
+            if len(seeable_landmarks_robot) > 0:
+              self.knn.fit(Utils.normalize(seeable_landmarks_robot, self.scales))
+              distances, _ = self.knn.kneighbors(
+                  Utils.normalize(
+                      Utils.landmarklist_to_array(msg.landmarks), self.scales))
 
-        # Compare with observation.
-        self.knn.fit(Utils.normalize(seeable_landmarks_robot))
-        distances, _ = self.knn.kneighbors(
-            Utils.normalize(
-                Utils.landmarklist_to_array(msg.landmark), self.scales))
-
-        # Update particle weights.
-        self.weights[idx] /= np.sum(distances)
-        self.weights /= np.sum(self.weights)
-      self.state_lock.release()
+              # Update particle weights.
+              self.weights[idx] /= np.sum(distances)
+          self.weights /= np.sum(self.weights)
+          self.state_lock.release()
+          self.stable_landmark_msg_count = 0
+          self.prev_landmark_update_time = rospy.get_time()
+    self.prev_landmark_count = N
 
   def initialize_particles_pose(self):
     '''
@@ -789,9 +825,7 @@ class ParticleFiler():
         Ensures the state is correctly initialized, and acquires the state lock before proceeding.
         '''
     if self.lidar_initialized and self.odom_initialized and self.map_initialized:
-      if self.state_lock.locked():
-        rospy.loginfo("Concurrency error avoided")
-      else:
+      if not self.state_lock.locked():
         self.state_lock.acquire()
         self.timer.tick()
         self.iters += 1
