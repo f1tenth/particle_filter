@@ -5,6 +5,8 @@ import rospy
 from geometry_msgs.msg import PoseStamped
 import utils as Utils
 
+import numpy as np
+
 if __name__ == "__main__":
   rospy.init_node("initialpose_publisher")
   initialpose_pub = rospy.Publisher("/initial_pose", PoseStamped, queue_size=1)
@@ -15,7 +17,7 @@ if __name__ == "__main__":
     pose.header.frame_id = "map"
     pose.pose.position.x = -5.0
     pose.pose.position.y = -.5
-    pose.pose.orientation = Utils.angle_to_quaternion(0.0)
+    pose.pose.orientation = Utils.angle_to_quaternion(-np.pi/2)
     initialpose_pub.publish(pose)
 
   rospy.spin()
