@@ -84,7 +84,7 @@ class ParticleFiler():
     # of landmarks detected and save it in self.stable_landmark_msg_count.
     # 2. If the stable_landmark_msg_count has reached the window size, do particle
     # weight update based on the last landmark detection result.
-    self.landmark_window = int(rospy.get_param("~landmark_window", 6))
+    self.landmark_window = int(rospy.get_param("~landmark_window", 5))
     self.stable_landmark_msg_count = 0
     self.prev_landmark_count = None
     self.prev_landmark_update_time = rospy.get_time()
@@ -431,69 +431,84 @@ class ParticleFiler():
         by multiplicatively accumulating the inverse of distances.
     '''
     N = len(msg.landmarks)
-    # Do nothing if no object detected or the detection is unstable.
-    # TODO(shumin): change 3s to a const param.
-    time_diff = rospy.get_time() - self.prev_landmark_update_time
-    if N == 0 or N != self.prev_landmark_count or time_diff < 3:
+    if N == 0 or N != self.prev_landmark_count:
       self.stable_landmark_msg_count = 0
+
     # Increase the stable msg count if it has the same number of
     # landmark detected.
     else:
       self.stable_landmark_msg_count += 1
       if self.stable_landmark_msg_count >= self.landmark_window:
-        if self.state_lock.locked():
-          rospy.logwarn("Landmark update blocked!")
-        else:
-          self.state_lock.acquire()
-          for idx, particle in enumerate(self.particles):
-            ref_landmark_cnt = len(self.landmark)
-            poses = particle.reshape(1, -1).repeat(ref_landmark_cnt, axis=0)
+        n_best_particles = 20
+        best_particles_idx = (-self.weights).argsort()[:n_best_particles]
+        best_particles = self.particles[best_particles_idx]
+        min_distance = 1000000
+        best_particle = None
+        for particle in best_particles:
+          ref_landmark_cnt = len(self.landmark)
+          poses = particle.reshape(1, -1).repeat(ref_landmark_cnt, axis=0)
 
-            # Find seeable reference landmarks.
-            ranges = np.zeros(ref_landmark_cnt, dtype=np.float32)
-            print("calling arctan")
-            thetas = np.arctan2(self.landmark[:, 1] - poses[:, 1],
-                                self.landmark[:, 0] - poses[:, 0]).reshape(
-                                    -1, 1)
-            queries = np.concatenate((poses[:, :2], thetas), axis=1).astype(np.float32)
-            print("calling calc_range_many")
-            self.range_method.calc_range_many(queries, ranges)
-            print("calling seeable")
-            seeable = Utils.seeable(self.landmark, poses, ranges,
-                                    self.MAX_CAM_DISTANCE, self.FOV)
-            seeable_landmarks_robot = self.landmark[
-                seeable, :-1] - particle.reshape(1, -1)
-            if np.argmax(self.weights) == idx:
-              self.debug_msg = PoseArray()
-              self.debug_msg.header = Utils.make_header("map")
-              self.debug_msg.poses = Utils.particles_to_poses(self.landmark[seeable, :-1])
-              self.landmark_debug_pub.publish(self.debug_msg)
-            # Compare with observation.
-            if len(seeable_landmarks_robot) > 0:
-              self.knn.fit(Utils.normalize(seeable_landmarks_robot, self.scales))
-              distances, _ = self.knn.kneighbors(
-                  Utils.normalize(
-                      Utils.landmarklist_to_array(msg.landmarks), self.scales))
+          # Find seeable reference landmarks.
+          ranges = np.zeros(ref_landmark_cnt, dtype=np.float32)
+          thetas = np.arctan2(self.landmark[:, 1] - poses[:, 1],
+                              self.landmark[:, 0] - poses[:, 0]).reshape(
+                                  -1, 1)
+          queries = np.concatenate((poses[:, :2], thetas), axis=1).astype(np.float32)
+          self.range_method.calc_range_many(queries, ranges)
+          seeable = Utils.seeable(self.landmark, poses, ranges,
+                                  self.MAX_CAM_DISTANCE, self.FOV)
+          seeable_landmarks_robot = self.landmark[
+              seeable, :-1] - particle.reshape(1, -1)
+          # this part is for debugging.
+          # if np.argmax(self.weights) == idx:
+          #   self.debug_msg = PoseArray()
+          #   self.debug_msg.header = Utils.make_header("map")
+          #   self.debug_msg.poses = Utils.particles_to_poses(self.landmark[seeable, :-1])
+          #   self.landmark_debug_pub.publish(self.debug_msg)
 
-              # Update particle weights.
-              self.weights[idx] /= np.sum(distances)
-          self.weights /= np.sum(self.weights)
-          self.state_lock.release()
+          # Compare with observation.
+          if len(seeable_landmarks_robot) > 0:
+            self.knn.fit(Utils.normalize(seeable_landmarks_robot, self.scales))
+            distances, _ = self.knn.kneighbors(
+                Utils.normalize(
+                    Utils.landmarklist_to_array(msg.landmarks), self.scales))
+          if np.sum(distances) < min_distance:
+            min_distance = np.sum(distances)
+            best_particle = particle
+          self.initialize_particles_pose(pose=Utils.particle_to_pose(best_particle))
           self.stable_landmark_msg_count = 0
           self.prev_landmark_update_time = rospy.get_time()
     self.prev_landmark_count = N
 
-  def initialize_particles_pose(self):
+  def initialize_particles_pose(self, pose = None):
     '''
         Initialize particles in the general region of the provided pose.
         If pose if not provided, initialize particles uniformly in the
         non-occupied area.
+        This function serves in two ways: 1) initialize particles 2) re-initialize
+        a new set of particles.
     '''
+     # Relocate the robot with given pose and a normal distribution.
+    if pose != None:
+        if self.state_lock.locked():
+          rospy.logwarn("Landmark update blocked!")
+        else:
+          self.state_lock.acquire()
+          self.weights = np.ones(self.MAX_PARTICLES) / float(self.MAX_PARTICLES)
+          self.particles[:, 0] = pose.position.x + np.random.normal(
+              loc=0.0, scale=0.1, size=self.MAX_PARTICLES)
+          self.particles[:, 1] = pose.position.y + np.random.normal(
+              loc=0.0, scale=0.1, size=self.MAX_PARTICLES)
+          self.particles[:, 2] = Utils.quaternion_to_angle(
+              pose.orientation) + np.random.normal(
+                  loc=0.0, scale=0.1, size=self.MAX_PARTICLES)
+          self.state_lock.release()
+        return
 
+    # Initialize the particles from initial pose topic.
     self.state_lock.acquire()
     try:
       pose = rospy.wait_for_message("/initial_pose", PoseStamped, timeout=10)
-
       # Initialize a set of particles with normal distribution.
       self.weights = np.ones(self.MAX_PARTICLES) / float(self.MAX_PARTICLES)
       self.particles[:, 0] = pose.pose.position.x + np.random.normal(
@@ -504,10 +519,6 @@ class ParticleFiler():
           pose.pose.orientation) + np.random.normal(
               loc=0.0, scale=0.4, size=self.MAX_PARTICLES)
 
-      # Set the current inferred_pose.
-      # self.inferred_pose = np.array([pose.pose.position.x, pose.pose.position.y, Utils.quaternion_to_angle(
-      #     pose.pose.orientation)])
-      # self.visualize()
     except rospy.ROSException:
       rospy.logwarn(
           "No initial pose is received. Localization might be unstable!")
@@ -796,9 +807,11 @@ class ParticleFiler():
       t_motion = time.time()
 
     # compute the sensor model
-    self.sensor_model(proposal_distribution, o, self.weights)
-    if self.SHOW_FINE_TIMING:
-      t_sensor = time.time()
+    # TODO(shumin): tune this and change it into a param.
+    if rospy.get_time() - self.prev_landmark_update_time > 0.8:
+      self.sensor_model(proposal_distribution, o, self.weights)
+      if self.SHOW_FINE_TIMING:
+        t_sensor = time.time()
 
     # normalize importance weights
     self.weights /= np.sum(self.weights)
