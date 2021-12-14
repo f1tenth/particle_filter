@@ -7,6 +7,7 @@ import numpy as np
 import range_libc
 import time
 from threading import Lock
+from rospy.client import DEBUG
 import tf.transformations
 import tf
 import utils as Utils
@@ -19,7 +20,7 @@ from geometry_msgs.msg import Point, Pose, PoseStamped, PoseArray, Quaternion, P
 from nav_msgs.msg import Odometry
 from nav_msgs.msg import OccupancyGrid
 from nav_msgs.srv import GetMap
-from cartographer_ros_msgs.msg import LandmarkList
+from darknet_ros_msgs.msg import BoundingBox, BoundingBoxes, ObjectCount
 
 # visualization packages
 import matplotlib.pyplot as plt
@@ -61,7 +62,7 @@ class ParticleFiler():
     self.Z_SHORT = float(rospy.get_param("~z_short", 0.01))
     self.Z_MAX = float(rospy.get_param("~z_max", 0.07))
     self.Z_RAND = float(rospy.get_param("~z_rand", 0.12))
-    self.Z_HIT = float(rospy.get_param("~z_hit", 0.75))
+    self.Z_HIT = float(rospy.get_param("~z_hit", 0.85))
     self.SIGMA_HIT = float(rospy.get_param("~sigma_hit", 8.0))
 
     # motion model constants
@@ -74,10 +75,18 @@ class ParticleFiler():
 
     # parameters used in the landmark callback.
     # TODO(zhihao): determine the first one.
-    self.MAX_CAM_DISTANCE = float(rospy.get_param("~max_cam_distance", 20))
+    self.MAX_CAM_DISTANCE = float(rospy.get_param("~max_cam_distance", 100))
     # TODO(shumin): calculate this from intrinsic params
     self.FOV = float(rospy.get_param("~FOV", 150))
-
+    # TODO(shumin): load this as param. load from camera params file.
+    self.extrinsic = np.array([ [-1.1527182399837010e-01, -9.9211893973316534e-01, 4.9116351806995348e-02,  1.4841522545173192e-02],
+                                [-1.1903863806737468e-01, -3.5292640768051498e-02, -9.9226217914152193e-01, 7.0031433633410675e-02],
+                                [9.8617554686736841e-01,  -1.2022661490018352e-01, -1.1403224031163128e-01, 2.9080002039360585e-02],
+                                [0,                       0,                        0,                      1]])
+    self.intrinsic = np.array([ [1426,   0,      698],
+                                [0,      1422,   465],
+                                [0,       0,      1 ]])
+    self.bbox_prob_threshold = float(rospy.get_param("~bbox_prob_threshold", 0.75))
     # The landmark detection is quite unstable, do smoothing over a window
     # of size self.landmark_window as follows:
     # 1. Count the number of consecutive landmark msgs that have same number
@@ -197,8 +206,8 @@ class ParticleFiler():
         queue_size=1)
     if self.landmark_initialized:
       self.landmark_sub = rospy.Subscriber(
-          rospy.get_param("~landmark_topic", "/landmark"),
-          LandmarkList,
+          rospy.get_param("~bbox_topic", "/darknet_ros/bounding_boxes"),
+          BoundingBoxes,
           self.landmarkCB,
           queue_size=1)
     self.initialize_particles_pose()
@@ -430,8 +439,14 @@ class ParticleFiler():
         between the observation and reference landmarks, and update particle weights
         by multiplicatively accumulating the inverse of distances.
     '''
-    N = len(msg.landmarks)
-    if N == 0 or N != self.prev_landmark_count:
+    N = len(msg.bounding_boxes)
+    for bbox in msg.bounding_boxes:
+      # Only update when all observations are confident enough.
+      if bbox.probability < self.bbox_prob_threshold:
+        self.stable_landmark_msg_count = 0
+        return
+    # Only update when landmark count > 1, and is stable.
+    if N <=1 or N != self.prev_landmark_count:
       self.stable_landmark_msg_count = 0
 
     # Increase the stable msg count if it has the same number of
@@ -439,11 +454,13 @@ class ParticleFiler():
     else:
       self.stable_landmark_msg_count += 1
       if self.stable_landmark_msg_count >= self.landmark_window:
+        # TODO(shumin): change this to a input param.
         n_best_particles = 20
         best_particles_idx = (-self.weights).argsort()[:n_best_particles]
         best_particles = self.particles[best_particles_idx]
         min_distance = 1000000
         best_particle = None
+        DEBUG_first = True
         for particle in best_particles:
           ref_landmark_cnt = len(self.landmark)
           poses = particle.reshape(1, -1).repeat(ref_landmark_cnt, axis=0)
@@ -457,21 +474,34 @@ class ParticleFiler():
           self.range_method.calc_range_many(queries, ranges)
           seeable = Utils.seeable(self.landmark, poses, ranges,
                                   self.MAX_CAM_DISTANCE, self.FOV)
-          seeable_landmarks_robot = self.landmark[
-              seeable, :-1] - particle.reshape(1, -1)
+
+          seeable_landmarks_pixel = Utils.world_to_pixel(self.landmark[seeable, :2], particle, self.extrinsic, self.intrinsic)
+            
           # this part is for debugging.
-          # if np.argmax(self.weights) == idx:
+          if DEBUG_first:
+            points_world = self.landmark[seeable, :2]
+            with open("/home/shumin/Desktop/seeable_landmarks_world.npy", "wb") as f:
+              np.save(f, points_world)
+            with open("/home/shumin/Desktop/seeable_particle.npy", "wb") as f:
+              np.save(f, particle)
+            points_robot = Utils.world_to_robot(self.landmark[seeable, :2], particle)
+            with open("/home/shumin/Desktop/seeable_landmarks_robot.npy", "wb") as f:
+              np.save(f, points_robot)
+            points_camera = Utils.robot_to_camera(points_robot, self.extrinsic)
+            with open("/home/shumin/Desktop/seeable_landmarks_camera.npy", "wb") as f:
+              np.save(f, points_camera)
+            with open("/home/shumin/Desktop/seeable_landmarks_pixel.npy", "wb") as f:
+              np.save(f, seeable_landmarks_pixel)
+            DEBUG_first = False
           #   self.debug_msg = PoseArray()
           #   self.debug_msg.header = Utils.make_header("map")
           #   self.debug_msg.poses = Utils.particles_to_poses(self.landmark[seeable, :-1])
           #   self.landmark_debug_pub.publish(self.debug_msg)
 
           # Compare with observation.
-          if len(seeable_landmarks_robot) > 0:
-            self.knn.fit(Utils.normalize(seeable_landmarks_robot, self.scales))
-            distances, _ = self.knn.kneighbors(
-                Utils.normalize(
-                    Utils.landmarklist_to_array(msg.landmarks), self.scales))
+          if len(seeable_landmarks_pixel) > 0:
+            self.knn.fit(seeable_landmarks_pixel)
+            distances, _ = self.knn.kneighbors(Utils.bboxes_to_array(msg.bounding_boxes))
           if np.sum(distances) < min_distance:
             min_distance = np.sum(distances)
             best_particle = particle
@@ -808,7 +838,7 @@ class ParticleFiler():
 
     # compute the sensor model
     # TODO(shumin): tune this and change it into a param.
-    if rospy.get_time() - self.prev_landmark_update_time > 0.8:
+    if rospy.get_time() - self.prev_landmark_update_time > 0.5:
       self.sensor_model(proposal_distribution, o, self.weights)
       if self.SHOW_FINE_TIMING:
         t_sensor = time.time()

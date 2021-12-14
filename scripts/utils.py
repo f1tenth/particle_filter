@@ -11,7 +11,7 @@ import tf
 import matplotlib.pyplot as plt
 import time
 import csv
-
+import yaml
 
 class CircularArray(object):
   """ Simple implementation of a circular array.
@@ -279,9 +279,10 @@ def seeable(landmarks, poses, ranges, max_distance, FOV):
   angles_l = np.arctan2(Yl - Yp, Xl - Xp) - Thetap
   angles_r = np.arctan2(Yr - Yp, Xr - Xp) - Thetap
   # Check if distances and angles are within sight.
-  ranges += 1  # padding.
+  ranges += 2 # padding.
   seeable = (distances_l <= ranges**2) & \
             (distances_r <= ranges**2) & \
+            (distances_r >= 3.5) & \
             (np.abs(angles_l) <= np.deg2rad(FOV/2)) & \
             (np.abs(angles_r) <= np.deg2rad(FOV/2))
 
@@ -300,6 +301,12 @@ def normalize(x, scales):
 
   return x
 
+def bboxes_to_array(bboxes):
+  '''Convert from bounding boxes to numpy array on the ground'''
+  arr = []
+  for bbox in bboxes:
+    arr.append([(bbox.xmin + bbox.xmax)/2, bbox.ymax])
+  return np.array(arr)
 
 def landmarklist_to_array(landmark_list):
   ''' Convert from cartographer_ros LandmarkList to numpy array.'''
@@ -324,3 +331,82 @@ def landmark_detection_list_to_array(landmark_list):
         landmark.tracking_from_landmark_transform.orientation.z
     ])
   return a
+
+
+def get_camera_params(camera_params_path):
+  return
+
+def camera_to_pixel(X, Y, Z, fx, fy, u0, v0):
+  '''
+    Transform a set of points from camera coordinate to pixel coordinate.
+  '''
+  if X.shape[0] == Y.shape[0] and Y.shape[0] == Z.shape[0]:
+    return (fx * X / Z + u0).reshape(-1), (fy * Y / Z + v0).reshape(-1)
+  else:
+    rospy.logwarn(
+        "X, Y, Z should have the same shape!"
+    )
+    return
+
+def world_to_robot(points, particle):
+  '''
+    Transform a set of 2D points(x, y) from world coordinate to robot coordinate, shape = (N, 2)
+    Robot coordinate is the particle coordinate: (xp, yp, thetap)
+
+    Returns the set of 2D points in the robot frame, shape = (N, 2).
+  '''
+  points = points.T
+  N = points.shape[1]
+
+  # Compute homogeneous coordinates of points.
+  points_homo = np.append(points, np.ones((1, N)), axis=0)
+
+  # Compute transformation from world to robot(particle).
+  world_T_robot = np.array([[np.cos(particle[2]),  np.sin(particle[2]),  particle[0] ],
+                            [-np.sin(particle[2]),  np.cos(particle[2]),  particle[1] ],
+                            [0,                     0,                    1           ]])
+  robot_T_world = np.linalg.inv(world_T_robot)
+  points_robot = (robot_T_world @ points_homo)[:-1, :]
+
+  return points_robot.T
+
+
+def robot_to_camera(points, extrinsic):
+  '''
+    Transform a set of 2D points(x, y) from robot coordinate to camera coordinate.
+
+    Input:
+      points, ndarray of shape (N, 2), the set of 2D points(x, y) to be transformed.
+      extrinsic, ndarray of shape (4, 4), the camera extrinsic matrix.
+    
+    Returns the set of 3D points in the camera frame, shape = (N, 3).
+  '''
+  points = points.T
+  N = points.shape[1]
+  points_3d_homo = np.append(np.append(points, np.zeros((1,N)), axis=0), np.ones((1,N)), axis=0)
+  points_3d_camera = (extrinsic @ points_3d_homo)[:-1, :]
+  return points_3d_camera.T
+
+def world_to_pixel(points, particle, extrinsic, intrinsic):
+  '''
+    Transform a set of 2D points(x, y) from robot coordinate to camera coordinate.
+
+    Input:
+      points, ndarray of shape (N, 2), the set of 2D points(x, y) to be transformed.
+      particle, ndarray of shape (3, ), the expected robot coordinate in world frame.
+      intrinsic, ndarray of shape (3, 3), the camera intrinsic matrix.
+      extrinsic, ndarray of shape (4, 4), the camera extrinsic matrix.
+    
+    Returns the set of 2D pixels of given points, shape = (N, 2).
+  '''
+  # with open("/home/shumin/Desktop/seeable_landmarks_world.npy", "wb") as f:
+  #   np.save(f, points)
+  points_robot = world_to_robot(points, particle)
+  # with open("/home/shumin/Desktop/seeable_landmarks_robot.npy", "wb") as f:
+  #   np.save(f, points_robot)
+  points_camera = robot_to_camera(points_robot, extrinsic)
+  # with open("/home/shumin/Desktop/seeable_landmarks_camera.npy", "wb") as f:
+  #   np.save(f, points_camera)
+  points_u, points_v = camera_to_pixel(points_camera[:, 0], points_camera[:, 1], points_camera[:, 2],
+      intrinsic[0, 0], intrinsic[1, 1], intrinsic[0, 2], intrinsic[1, 2])
+  return np.concatenate((points_u.reshape(-1, 1), points_v.reshape(-1, 1)), axis=1)
