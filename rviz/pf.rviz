@@ -99,7 +99,7 @@ Visualization Manager:
       Axes Length: 0.30000001192092896
       Axes Radius: 0.1
       Class: rviz/PoseArray
-      Color: 255; 25; 0
+      Color: 255; 0; 0
       Enabled: true
       Head Length: 0.1000000029802322
       Head Radius: 0.059999999329447746
@@ -107,7 +107,7 @@ Visualization Manager:
       Shaft Length: 0.23000000417232513
       Shaft Radius: 0.009999999776482582
       Shape: Arrow (Flat)
-      Topic: /revit/landmark_pose_array
+      Topic: /pf/seeable
       Unreliable: false
       Value: true
     - Alpha: 1
