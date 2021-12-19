@@ -34,7 +34,7 @@
 	<arg name="odometry_topic" default="/vesc/odom"/>
 	<!-- <arg name="odometry_topic" default="/odom"/> -->
 	<arg name="angle_step" default="18"/>
-	<arg name="max_particles" default="4000"/>
+	<arg name="max_particles" default="400"/>
 	<arg name="squash_factor" default="2.2"/>
 	<arg name="viz" default="1"/>
   <arg name="landmark_filename" default="$(find particle_filter)/csv/levine_2.csv"/>
