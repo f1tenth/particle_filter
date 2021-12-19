@@ -14,6 +14,7 @@ find_package(catkin REQUIRED COMPONENTS
   image_transport
   sensor_msgs
   std_msgs
+  darknet_ros_msgs
   tf
 )
 
@@ -114,7 +115,7 @@ endif(OpenCV_FOUND)
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES particle_filter
-  CATKIN_DEPENDS  message_runtime rospy roscpp cv_bridge image_transport sensor_msgs std_msgs tf
+  CATKIN_DEPENDS  message_runtime rospy roscpp cv_bridge image_transport sensor_msgs std_msgs darknet_ros_msgs tf
 #  DEPENDS system_lib
 )
 
