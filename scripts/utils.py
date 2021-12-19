@@ -6,6 +6,7 @@ import pandas as pd
 from std_msgs.msg import Header
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import Point, Pose, PoseStamped, PoseArray, Quaternion, PolygonStamped, Polygon, Point32, PoseWithCovarianceStamped, PointStamped
+from darknet_ros_msgs.msg import BoundingBox, BoundingBoxes, ObjectCount
 import tf.transformations
 import tf
 import matplotlib.pyplot as plt
@@ -213,7 +214,7 @@ def read_landmark_csv(filename):
   with open(filename, 'r') as csv_file:
     reader = csv.DictReader(csv_file)
     for line in reader:
-      if line['Type'] != 'wall':
+      if line['Type'] == 'door':
         landmark_list.append(
             np.array([
                 float(line['x_1']),
@@ -276,13 +277,15 @@ def seeable(landmarks, poses, ranges, max_distance, FOV):
   Xl, Yl = landmarks_l[:, 0], landmarks_l[:, 1]
   Xr, Yr = landmarks_r[:, 0], landmarks_r[:, 1]
   Xp, Yp, Thetap = poses[:, 0], poses[:, 1], poses[:, 2]
-  angles_l = np.arctan2(Yl - Yp, Xl - Xp) - Thetap
-  angles_r = np.arctan2(Yr - Yp, Xr - Xp) - Thetap
+  angles_l = (np.arctan2(Yl - Yp, Xl - Xp) - Thetap) % (2*np.pi)
+  angles_l = np.where(angles_l < np.pi, angles_l, angles_l - 2*np.pi)
+  angles_r = (np.arctan2(Yr - Yp, Xr - Xp) - Thetap) % (2*np.pi)
+  angles_r = np.where(angles_r < np.pi, angles_r, angles_r - 2*np.pi)
+
   # Check if distances and angles are within sight.
   ranges += 2 # padding.
   seeable = (distances_l <= ranges**2) & \
             (distances_r <= ranges**2) & \
-            (distances_r >= 3.5) & \
             (np.abs(angles_l) <= np.deg2rad(FOV/2)) & \
             (np.abs(angles_r) <= np.deg2rad(FOV/2))
 
@@ -301,12 +304,31 @@ def normalize(x, scales):
 
   return x
 
+def bbox_to_array(bbox):
+  return np.array([(bbox.xmin + bbox.xmax)/2, bbox.ymax])
+
 def bboxes_to_array(bboxes):
   '''Convert from bounding boxes to numpy array on the ground'''
-  arr = []
-  for bbox in bboxes:
-    arr.append([(bbox.xmin + bbox.xmax)/2, bbox.ymax])
-  return np.array(arr)
+  return np.array(list(map(bbox_to_array, bboxes)))
+
+def array_to_bbox(a):
+  '''Convert from numpy array of size (2, ) or (4, ) to a bbox object.'''
+  bbox = BoundingBox()
+  if a.shape[0] == 2:
+    bbox.xmin, bbox.ymin = a
+    bbox.xmax, bbox.ymax = a
+  elif a.shape[0] == 4:
+    bbox.xmin, bbox.ymin, bbox.xmax, bbox.ymax = a
+  else:
+    rospy.logerr("Given array cannot be converted to bounding box!")
+  return bbox
+
+def array_to_bboxes(a):
+  '''Convert from numpy array of size (N, 2) or (N, 4) to a bboxes object.'''
+  a = a.astype(int)
+  bboxes = BoundingBoxes()
+  bboxes.bounding_boxes = list(map(array_to_bbox, a))
+  return bboxes
 
 def landmarklist_to_array(landmark_list):
   ''' Convert from cartographer_ros LandmarkList to numpy array.'''
@@ -320,55 +342,46 @@ def landmarklist_to_array(landmark_list):
     ])
   return a
 
-def landmark_detection_list_to_array(landmark_list):
-  ''' TODO: Convert from cad2cav LandmarkDetectionList to numpy array.'''
 
-  a = np.empty((len(landmark_list), 3))
-  for i, landmark in enumerate(landmark_list):
-    a[i] = np.array([
-        landmark.tracking_from_landmark_transform.position.x,
-        landmark.tracking_from_landmark_transform.position.y,
-        landmark.tracking_from_landmark_transform.orientation.z
-    ])
-  return a
-
-
-def get_camera_params(camera_params_path):
-  return
-
-def camera_to_pixel(X, Y, Z, fx, fy, u0, v0):
+def world_to_robot_singe(point, particle):
   '''
-    Transform a set of points from camera coordinate to pixel coordinate.
-  '''
-  if X.shape[0] == Y.shape[0] and Y.shape[0] == Z.shape[0]:
-    return (fx * X / Z + u0).reshape(-1), (fy * Y / Z + v0).reshape(-1)
-  else:
-    rospy.logwarn(
-        "X, Y, Z should have the same shape!"
-    )
-    return
+    Transform a single 2D point (x, y) from world coordinate to robot coordinate
+    defined by a particle pose (xp, yp, thetap).
+    
+    Inputs:
+      1) point, ndarray of shape (2, ), 2D points to be transformed.
+      2) particle, ndarray of shape (3, ), particle pose.
 
-def world_to_robot(points, particle):
+    Return
+    The 2D points in the robot frame, ndarray of shape (2, ).
   '''
-    Transform a set of 2D points(x, y) from world coordinate to robot coordinate, shape = (N, 2)
-    Robot coordinate is the particle coordinate: (xp, yp, thetap)
-
-    Returns the set of 2D points in the robot frame, shape = (N, 2).
-  '''
-  points = points.T
-  N = points.shape[1]
-
   # Compute homogeneous coordinates of points.
-  points_homo = np.append(points, np.ones((1, N)), axis=0)
+  point_homo = np.append(point, 1)
 
   # Compute transformation from world to robot(particle).
-  world_T_robot = np.array([[np.cos(particle[2]),  np.sin(particle[2]),  particle[0] ],
-                            [-np.sin(particle[2]),  np.cos(particle[2]),  particle[1] ],
-                            [0,                     0,                    1           ]])
+  # a_T_b is the transformation a^T_b which is from b to a.
+  world_T_robot = np.array([[np.cos(particle[2]),  -np.sin(particle[2]),  particle[0]],
+                            [np.sin(particle[2]),   np.cos(particle[2]),  particle[1]],
+                            [0,                     0,                    1          ]])
   robot_T_world = np.linalg.inv(world_T_robot)
-  points_robot = (robot_T_world @ points_homo)[:-1, :]
+  point_robot = (robot_T_world @ point_homo)[:-1]
+  return point_robot
 
-  return points_robot.T
+def world_to_robot(points, particles):
+  '''
+    Transform a set of 2D points(x, y) from world coordinate to robot coordinates
+    defined by particle poses.
+    
+    Inputs:
+      1) points, ndarray of shape (N, 2), 2D points to be transformed.
+      2) particles, ndarray of shape (N, 3), poses defining coordinates
+          for each point to transform to. The second dimension is (xp, yp, thetap)
+
+    Return
+    The set of 2D points in the robot frame, ndarray of shape (N, 2).
+  '''
+
+  return np.array(list(map(world_to_robot_singe, points, particles)))
 
 
 def robot_to_camera(points, extrinsic):
@@ -387,6 +400,18 @@ def robot_to_camera(points, extrinsic):
   points_3d_camera = (extrinsic @ points_3d_homo)[:-1, :]
   return points_3d_camera.T
 
+def camera_to_pixel(X, Y, Z, fx, fy, u0, v0):
+  '''
+    Transform a set of points from camera coordinate to pixel coordinate.
+  '''
+  if X.shape[0] == Y.shape[0] and Y.shape[0] == Z.shape[0]:
+    return (fx * X / Z + u0).reshape(-1), (fy * Y / Z + v0).reshape(-1)
+  else:
+    rospy.logwarn(
+        "X, Y, Z should have the same shape!"
+    )
+    return
+
 def world_to_pixel(points, particle, extrinsic, intrinsic):
   '''
     Transform a set of 2D points(x, y) from robot coordinate to camera coordinate.
@@ -399,14 +424,8 @@ def world_to_pixel(points, particle, extrinsic, intrinsic):
     
     Returns the set of 2D pixels of given points, shape = (N, 2).
   '''
-  # with open("/home/shumin/Desktop/seeable_landmarks_world.npy", "wb") as f:
-  #   np.save(f, points)
   points_robot = world_to_robot(points, particle)
-  # with open("/home/shumin/Desktop/seeable_landmarks_robot.npy", "wb") as f:
-  #   np.save(f, points_robot)
   points_camera = robot_to_camera(points_robot, extrinsic)
-  # with open("/home/shumin/Desktop/seeable_landmarks_camera.npy", "wb") as f:
-  #   np.save(f, points_camera)
   points_u, points_v = camera_to_pixel(points_camera[:, 0], points_camera[:, 1], points_camera[:, 2],
       intrinsic[0, 0], intrinsic[1, 1], intrinsic[0, 2], intrinsic[1, 2])
   return np.concatenate((points_u.reshape(-1, 1), points_v.reshape(-1, 1)), axis=1)
