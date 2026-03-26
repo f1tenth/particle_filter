@@ -262,7 +262,7 @@ class ParticleFiler(Node):
         # also publish odometry to facilitate getting the localization pose
         if self.PUBLISH_ODOM:
             odom = Odometry()
-            odom.header.stamp = self.get_clock().now().to_msg()
+            odom.header.stamp = stamp
             odom.header.frame_id = 'map'
             odom.child_frame_id = 'laser'
             odom.pose.pose.position.x = pose[0]
