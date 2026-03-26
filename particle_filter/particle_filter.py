@@ -243,24 +243,28 @@ class ParticleFiler(Node):
         t = TransformStamped()
         # header
         t.header.stamp = stamp
-        t.header.frame_id = '/map'
-        t.child_frame_id = '/laser'
+        t.header.frame_id = 'laser'
+        t.child_frame_id = 'map'
         # translation
-        t.transform.translation.x = pose[0]
-        t.transform.translation.y = pose[1]
-        t.transform.translation.z = 0.0
         q = tf_transformations.quaternion_from_euler(0., 0., pose[2])
+        inv_q = tf_transformations.quaternion_inverse(q)
+        t_quat = [-pose[0], -pose[1], 0.0, 0.0]
+        t_quat_rotated = tf_transformations.quaternion_multiply(tf_transformations.quaternion_multiply(inv_q, t_quat), q)
+        t.transform.translation.x = t_quat_rotated[0]
+        t.transform.translation.y = t_quat_rotated[1]
+        t.transform.translation.z = 0.0
         # rotation
-        t.transform.rotation.x = q[0]
-        t.transform.rotation.y = q[1]
-        t.transform.rotation.z = q[2]
-        t.transform.rotation.w = q[3]
+        t.transform.rotation.x = inv_q[0]
+        t.transform.rotation.y = inv_q[1]
+        t.transform.rotation.z = inv_q[2]
+        t.transform.rotation.w = inv_q[3]
         self.pub_tf.sendTransform(t)
         # also publish odometry to facilitate getting the localization pose
         if self.PUBLISH_ODOM:
             odom = Odometry()
-            odom.header.stamp = self.get_clock().now().to_msg()
-            odom.header.frame_id = '/map'
+            odom.header.stamp = stamp
+            odom.header.frame_id = 'map'
+            odom.child_frame_id = 'laser'
             odom.pose.pose.position.x = pose[0]
             odom.pose.pose.position.y = pose[1]
             odom.pose.pose.orientation = Utils.angle_to_quaternion(pose[2])
