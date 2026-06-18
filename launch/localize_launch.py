@@ -22,44 +22,62 @@
 
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch.actions import DeclareLaunchArgument
 from ament_index_python.packages import get_package_share_directory
 import os
 import yaml
 
+
 def generate_launch_description():
-    # config and args
-    localize_config = os.path.join(
-        get_package_share_directory('particle_filter'),
-        'config',
-        'localize.yaml'
-    )
-    localize_config_dict = yaml.safe_load(open(localize_config, 'r'))
-    map_name = localize_config_dict['map_server']['ros__parameters']['map']
+    pkg_share = get_package_share_directory('particle_filter')
+    localize_config = os.path.join(pkg_share, 'config', 'localize.yaml')
+    maps_dir = os.path.join(pkg_share, 'maps')
+
+    try:
+        cfg = yaml.safe_load(open(localize_config, 'r'))
+        default_map = (cfg.get('map_server', {})
+                          .get('ros__parameters', {})
+                          .get('map', 'levine'))
+    except Exception:
+        default_map = 'levine'
+
     localize_la = DeclareLaunchArgument(
         'localize_config',
         default_value=localize_config,
-        description='Localization configs')
-    ld = LaunchDescription([localize_la])
+        description='Path to localization config YAML')
+    map_name_la = DeclareLaunchArgument(
+        'map_name',
+        default_value=default_map,
+        description='Map name (no extension) inside particle_filter/maps/; '
+                    'overrides the map_server.ros__parameters.map entry in localize.yaml')
 
-    # nodes
+    ld = LaunchDescription([localize_la, map_name_la])
+
     pf_node = Node(
         package='particle_filter',
         executable='particle_filter',
         name='particle_filter',
         parameters=[LaunchConfiguration('localize_config')]
     )
+
+    # PythonExpression concatenates the maps directory (resolved at launch-file load
+    # time) with the overridable map_name launch argument and the .yaml suffix.
+    map_yaml_path = PythonExpression(
+        ["'", maps_dir + '/', "' + '", LaunchConfiguration('map_name'), "' + '.yaml'"]
+    )
+
     map_server_node = Node(
         package='nav2_map_server',
         executable='map_server',
         name='map_server',
-        parameters=[{'yaml_filename': os.path.join(get_package_share_directory('particle_filter'), 'maps', map_name + '.yaml')},
+        parameters=[{'yaml_filename': map_yaml_path},
                     {'topic': 'map'},
                     {'frame_id': 'map'},
                     {'output': 'screen'},
                     {'use_sim_time': True}]
     )
+
     nav_lifecycle_node = Node(
         package='nav2_lifecycle_manager',
         executable='lifecycle_manager',
@@ -70,7 +88,6 @@ def generate_launch_description():
                     {'node_names': ['map_server']}]
     )
 
-    # finalize
     ld.add_action(nav_lifecycle_node)
     ld.add_action(map_server_node)
     ld.add_action(pf_node)

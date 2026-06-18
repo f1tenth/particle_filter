@@ -1,34 +1,96 @@
-particle_filter:
+/**:
   ros__parameters:
+    set_initial_pose: True # True: use pose below, False: Use RViz 2D Pose Estimate
+    initial_pose:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      yaw: 0.0
     # topic names
-    scan_topic: '/scan'
-    odometry_topic: '/odom'
+    scan_topic: 'scan'
+    odometry_topic: 'odom'
+    # QoS reliability: 'best_effort' for real hardware, 'reliable' for simulation
+    scan_qos_reliability: 'best_effort'
+    odom_qos_reliability: 'best_effort'
     # range data downsampling
-    angle_step: 18
-    max_particles: 4000
-    squash_factor: 2.2
+    # YDLIDAR X4: ~625 beams/rev; step=10 → ~62 beams per scan
+    angle_step: 10   # was 18 (~35 beams); more beams → sharper yaw. Watch MCL iters/s on Jetson; 12 (~52) is a lighter middle ground
+    max_particles: 2000  # reduced from 4000; halves all O(N) MCL work; validate N_eff in logs. 1500 (Autoware), 3000 (ForzaETH)
+    squash_factor: 1.0   # was 2.2; 1.0 = no flattening (exponent 1/squash). Lower squash → sharper weights
     # visualization
     viz: 1
     max_viz_particles: 60
+    # publish viz every Nth MCL cycle; default 4 → ~10 Hz at 40 Hz MCL (P-6)
+    viz_throttle: 4
     # ray marching method
     range_method: 'rmgpu'
-    theta_discretization: 112
-    # range data filtering
-    max_range: 10
+    theta_discretization: 112  # todo (test) 150 (ForzaETH)
+    # range data filtering — YDLIDAR X4 max range (m)
+    max_range: 10.0  # YDLIDAR X4
     fine_timing: 0
     publish_odom: 1
-    # sensor model constants
-    z_short: 0.01
-    z_max: 0.07
-    z_rand: 0.12
-    z_hit: 0.75
-    sigma_hit: 8.0
+    # MCL update rate in Hz; decoupled from odometry topic rate (P-2)
+    mcl_hz: 40.0
+    # seconds; MCL skips cycle if scan is older than this (F-4)
+    scan_max_age: 0.5
+    # seconds; MCL skips cycle if odom is older than this (publisher died after init)
+    odom_max_age: 0.5
+    # sensor model constants (YDLIDAR X4 tuned values)
+    z_short: 0.01    # YDLIDAR X4: low glass/crosstalk return probability
+    z_max: 0.07      # YDLIDAR X4: occasional max-range misses
+    z_rand: 0.12     # YDLIDAR X4: random noise returns
+    z_hit: 0.75      # YDLIDAR X4: probability of hitting the intended target
+    # sigma_hit in pixels (map_resolution × metres); X4 ±2% at 5m ≈ 10cm ≈ 2px at 0.05m/px
+    sigma_hit: 2.0   # YDLIDAR X4 (pixels); was 4.0 — sharpened for stronger yaw constraint
+    # rate parameter for the z_short exponential beam component (Thrun beam model)
+    lambda_short: 0.05  # YDLIDAR X4
     # motion model dispersion constants
-    motion_dispersion_x: 0.05
-    motion_dispersion_y: 0.025
-    motion_dispersion_theta: 0.25
+    motion_dispersion_x: 0.02
+    motion_dispersion_y: 0.02
+    motion_dispersion_theta: 0.05
+    # motion gate (AMCL update_min_d/_a): skip resample+noise below these so a
+    # stationary robot does not random-walk from per-tick noise. 0.0 = update every tick.
+    update_min_d: 0.02   # meters of accumulated translation before an MCL update
+    update_min_a: 0.01   # radians of accumulated rotation before an MCL update
     # sensor model variant, variant 2 good for rmgpu, 3 doesn't work for rmgpu
     rangelib_variant: 2
+    # -1 = random RNG; set >= 0 for reproducible particle divergence/convergence (E-7)
+    seed: -1
+
+    # Task 9: hybrid global localization
+    # meters between candidate x/y positions in coarse grid
+    global_loc_coarse_res: 0.3
+    # degrees between candidate orientations
+    global_loc_theta_res: 30.0
+    # number of best-scoring hypotheses to seed particles around
+    global_loc_top_k: 3
+    # minimum meters between chosen hypotheses (prevents clustering)
+    global_loc_min_dist: 1.0
+    # safety cap on candidate count; resolution is doubled if exceeded
+    global_loc_max_candidates: 50000
+    # seconds to wait for /initialpose at startup before auto-triggering (G-7)
+    global_loc_timeout: 5.0
+
+    # Frame IDs
+    # TF mode: set odom_frame_id to publish map→odom (nav-stack standard).
+    #          set to '' to publish map→base_link directly (no odom frame).
+    global_frame_id: 'map'
+    odom_frame_id: 'odom'
+    base_frame_id: 'base_link'
+    static_laser_to_base_link: True
+    transform_tolerance: 0.5
+    # TF republish is driven by the odom rate (broadcast when the odom stamp advances),
+    # not the MCL timer — this avoids TF_REPEATED_DATA drops when mcl_hz > odom rate.
+    # The heartbeat re-stamps the last transform if this many seconds pass with no
+    # fresh odom, so map→odom does not expire while odom is slow but alive. 0.0 disables.
+    tf_heartbeat_period: 0.2
+    # Comparison aid (default False, non-standard — AMCL and most nodes do not do this). When
+    # True in map→base mode, freeze the map→odom correction at the first fix and
+    # express the published pose relative to the odom origin, so pf/pose/odom starts
+    # coincident with raw odometry for direct odom-vs-PF trajectory comparison.
+    # Typical compare setup: odom_frame_id:'' (or ='map'), tf_broadcast:False,
+    # publish_odom:1, anchor_to_odom_origin:True.
+    anchor_to_odom_origin: False
 
 map_server:
   ros__parameters:

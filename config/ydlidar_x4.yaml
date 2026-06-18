@@ -1,0 +1,29 @@
+# YDLIDAR X4 sensor overlay
+# Use as: ros2 launch particle_filter localize_launch.py params_file:=config/ydlidar_x4.yaml
+#
+# Sensor specs: 0.12–10 m range, ±2% accuracy, ~5000 Hz sample rate,
+# ~625 beams at 8 Hz rotation, 360° FOV.
+#
+# This file overrides only sensor-model parameters. All other settings
+# (frame IDs, MCL rate, map, etc.) are loaded from localize.yaml first.
+
+/**:
+  ros__parameters:
+    # YDLIDAR X4 max range (m)
+    max_range: 10.0
+
+    # step=18 → ~35 beams per scan at 625 beams/rev
+    angle_step: 18
+
+    # Beam model weights
+    z_hit: 0.75    # probability of hitting the intended target
+    z_rand: 0.12   # random noise returns
+    z_short: 0.01  # low glass/crosstalk return probability
+    z_max: 0.07    # occasional max-range misses
+
+    # sigma_hit in pixels (map_resolution × metres)
+    # X4 ±2% at 5 m ≈ 10 cm; at 0.05 m/px → ~2 px; 4.0 is a conservative start
+    sigma_hit: 4.0
+
+    # exponential rate for the z_short beam component
+    lambda_short: 0.05
