@@ -1,6 +1,6 @@
 # MIT License
 
-# Copyright (c) 2020 Hongrui Zheng, Corey Walsh
+# Copyright (c) 2020 Hongrui Zheng, Corey Walsh, Chinmay Samak, Tanmay Samak
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the 'Software'), to deal
@@ -319,12 +319,12 @@ class ParticleFiler(Node):
         ls = LaserScan()
         ls.header.stamp = self.last_stamp
         ls.header.frame_id = '/laser'
-        ls.angle_min = np.min(angles)
-        ls.angle_max = np.max(angles)
-        ls.angle_increment = np.abs(angles[0] - angles[1])
-        ls.range_min = 0
-        ls.range_max = np.max(ranges)
-        ls.ranges = ranges
+        ls.angle_min = float(np.min(angles))
+        ls.angle_max = float(np.max(angles))
+        ls.angle_increment = float(np.abs(angles[0] - angles[1]))
+        ls.range_min = float(0)
+        ls.range_max = float(np.max(ranges))
+        ls.ranges = ranges.tolist()
         self.pub_fake_scan.publish(ls)
 
     def lidarCB(self, msg):
